@@ -1,0 +1,811 @@
+import { useState, useEffect, useCallback, useRef } from "react";
+
+// ============================================================
+// 👇 TEACHER PIN — change this
+// ============================================================
+const TEACHER_PIN = "9999";
+
+// ============================================================
+// ALL 15 KEYS — enharmonics are fully separate entries
+// ============================================================
+const KEYS = [
+  { name:"C",   side:"neither", accidentals:0, accidentalType:null,    accidentalList:[],                                worship:true,
+    chords:[{num:1,name:"C",quality:"Major"},{num:2,name:"D",quality:"minor"},{num:3,name:"E",quality:"minor"},{num:4,name:"F",quality:"Major"},{num:5,name:"G",quality:"Major"},{num:6,name:"A",quality:"minor"},{num:7,name:"B",quality:"dim"}]},
+  { name:"G",   side:"sharp",   accidentals:1, accidentalType:"sharp", accidentalList:["F#"],                            worship:true,
+    chords:[{num:1,name:"G",quality:"Major"},{num:2,name:"A",quality:"minor"},{num:3,name:"B",quality:"minor"},{num:4,name:"C",quality:"Major"},{num:5,name:"D",quality:"Major"},{num:6,name:"E",quality:"minor"},{num:7,name:"F#",quality:"dim"}]},
+  { name:"D",   side:"sharp",   accidentals:2, accidentalType:"sharp", accidentalList:["F#","C#"],                       worship:true,
+    chords:[{num:1,name:"D",quality:"Major"},{num:2,name:"E",quality:"minor"},{num:3,name:"F#",quality:"minor"},{num:4,name:"G",quality:"Major"},{num:5,name:"A",quality:"Major"},{num:6,name:"B",quality:"minor"},{num:7,name:"C#",quality:"dim"}]},
+  { name:"A",   side:"sharp",   accidentals:3, accidentalType:"sharp", accidentalList:["F#","C#","G#"],                  worship:true,
+    chords:[{num:1,name:"A",quality:"Major"},{num:2,name:"B",quality:"minor"},{num:3,name:"C#",quality:"minor"},{num:4,name:"D",quality:"Major"},{num:5,name:"E",quality:"Major"},{num:6,name:"F#",quality:"minor"},{num:7,name:"G#",quality:"dim"}]},
+  { name:"E",   side:"sharp",   accidentals:4, accidentalType:"sharp", accidentalList:["F#","C#","G#","D#"],             worship:true,
+    chords:[{num:1,name:"E",quality:"Major"},{num:2,name:"F#",quality:"minor"},{num:3,name:"G#",quality:"minor"},{num:4,name:"A",quality:"Major"},{num:5,name:"B",quality:"Major"},{num:6,name:"C#",quality:"minor"},{num:7,name:"D#",quality:"dim"}]},
+  { name:"B",   side:"sharp",   accidentals:5, accidentalType:"sharp", accidentalList:["F#","C#","G#","D#","A#"],        worship:true,
+    chords:[{num:1,name:"B",quality:"Major"},{num:2,name:"C#",quality:"minor"},{num:3,name:"D#",quality:"minor"},{num:4,name:"E",quality:"Major"},{num:5,name:"F#",quality:"Major"},{num:6,name:"G#",quality:"minor"},{num:7,name:"A#",quality:"dim"}]},
+  { name:"F#",  side:"sharp",   accidentals:6, accidentalType:"sharp", accidentalList:["F#","C#","G#","D#","A#","E#"],   worship:false,
+    chords:[{num:1,name:"F#",quality:"Major"},{num:2,name:"G#",quality:"minor"},{num:3,name:"A#",quality:"minor"},{num:4,name:"B",quality:"Major"},{num:5,name:"C#",quality:"Major"},{num:6,name:"D#",quality:"minor"},{num:7,name:"E#",quality:"dim"}]},
+  { name:"C#",  side:"sharp",   accidentals:7, accidentalType:"sharp", accidentalList:["F#","C#","G#","D#","A#","E#","B#"], worship:false,
+    chords:[{num:1,name:"C#",quality:"Major"},{num:2,name:"D#",quality:"minor"},{num:3,name:"E#",quality:"minor"},{num:4,name:"F#",quality:"Major"},{num:5,name:"G#",quality:"Major"},{num:6,name:"A#",quality:"minor"},{num:7,name:"B#",quality:"dim"}]},
+  { name:"Cb",  side:"flat",    accidentals:7, accidentalType:"flat",  accidentalList:["Bb","Eb","Ab","Db","Gb","Cb","Fb"], worship:false,
+    chords:[{num:1,name:"Cb",quality:"Major"},{num:2,name:"Db",quality:"minor"},{num:3,name:"Eb",quality:"minor"},{num:4,name:"Fb",quality:"Major"},{num:5,name:"Gb",quality:"Major"},{num:6,name:"Ab",quality:"minor"},{num:7,name:"Bb",quality:"dim"}]},
+  { name:"Gb",  side:"flat",    accidentals:6, accidentalType:"flat",  accidentalList:["Bb","Eb","Ab","Db","Gb","Cb"],   worship:false,
+    chords:[{num:1,name:"Gb",quality:"Major"},{num:2,name:"Ab",quality:"minor"},{num:3,name:"Bb",quality:"minor"},{num:4,name:"Cb",quality:"Major"},{num:5,name:"Db",quality:"Major"},{num:6,name:"Eb",quality:"minor"},{num:7,name:"F",quality:"dim"}]},
+  { name:"Db",  side:"flat",    accidentals:5, accidentalType:"flat",  accidentalList:["Bb","Eb","Ab","Db","Gb"],        worship:false,
+    chords:[{num:1,name:"Db",quality:"Major"},{num:2,name:"Eb",quality:"minor"},{num:3,name:"F",quality:"minor"},{num:4,name:"Gb",quality:"Major"},{num:5,name:"Ab",quality:"Major"},{num:6,name:"Bb",quality:"minor"},{num:7,name:"C",quality:"dim"}]},
+  { name:"Ab",  side:"flat",    accidentals:4, accidentalType:"flat",  accidentalList:["Bb","Eb","Ab","Db"],             worship:false,
+    chords:[{num:1,name:"Ab",quality:"Major"},{num:2,name:"Bb",quality:"minor"},{num:3,name:"C",quality:"minor"},{num:4,name:"Db",quality:"Major"},{num:5,name:"Eb",quality:"Major"},{num:6,name:"F",quality:"minor"},{num:7,name:"G",quality:"dim"}]},
+  { name:"Eb",  side:"flat",    accidentals:3, accidentalType:"flat",  accidentalList:["Bb","Eb","Ab"],                  worship:false,
+    chords:[{num:1,name:"Eb",quality:"Major"},{num:2,name:"F",quality:"minor"},{num:3,name:"G",quality:"minor"},{num:4,name:"Ab",quality:"Major"},{num:5,name:"Bb",quality:"Major"},{num:6,name:"C",quality:"minor"},{num:7,name:"D",quality:"dim"}]},
+  { name:"Bb",  side:"flat",    accidentals:2, accidentalType:"flat",  accidentalList:["Bb","Eb"],                       worship:false,
+    chords:[{num:1,name:"Bb",quality:"Major"},{num:2,name:"C",quality:"minor"},{num:3,name:"D",quality:"minor"},{num:4,name:"Eb",quality:"Major"},{num:5,name:"F",quality:"Major"},{num:6,name:"G",quality:"minor"},{num:7,name:"A",quality:"dim"}]},
+  { name:"F",   side:"flat",    accidentals:1, accidentalType:"flat",  accidentalList:["Bb"],                            worship:true,
+    chords:[{num:1,name:"F",quality:"Major"},{num:2,name:"G",quality:"minor"},{num:3,name:"A",quality:"minor"},{num:4,name:"Bb",quality:"Major"},{num:5,name:"C",quality:"Major"},{num:6,name:"D",quality:"minor"},{num:7,name:"E",quality:"dim"}]},
+];
+
+// 15-position circle order (clockwise) — sharps expand right, flats expand left, enharmonics sit at the bottom
+const CIRCLE_ORDER = ["C","G","D","A","E","B","F#","C#","Cb","Gb","Db","Ab","Eb","Bb","F"];
+const WORSHIP_KEYS = ["C","G","D","A","E","B","F"];
+
+// ============================================================
+// HELPERS
+// ============================================================
+function shuffle(arr) { return [...arr].sort(() => Math.random() - 0.5); }
+
+function pickWeightedKey(excludeName) {
+  const worship = KEYS.filter(k => k.worship && k.name !== excludeName);
+  const other   = KEYS.filter(k => !k.worship && k.name !== excludeName);
+  const pool = Math.random() < 0.7 ? worship : other;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function buildKeyRound(keyData) {
+  const steps = [];
+  const accWord = keyData.accidentalType === "sharp" ? "sharps" : keyData.accidentalType === "flat" ? "flats" : "sharps or flats";
+
+  const sideCorrect = keyData.side === "sharp" ? "Sharp side ♯" : keyData.side === "flat" ? "Flat side ♭" : "Neither — no sharps or flats";
+  steps.push({ type:"side", question:"Which side of the circle is it on?", options:shuffle(["Sharp side ♯","Flat side ♭","Neither — no sharps or flats"]), correct:sideCorrect });
+
+  const countCorrect = String(keyData.accidentals);
+  const wrongCounts = shuffle([0,1,2,3,4,5,6,7].filter(n=>n!==keyData.accidentals)).slice(0,3).map(String);
+  steps.push({ type:"count", question:`How many ${accWord} does it have?`, options:shuffle([countCorrect,...wrongCounts]), correct:countCorrect });
+
+  const whichCorrect = keyData.accidentals === 0 ? "None — C major has no sharps or flats" : keyData.accidentalList.join(", ");
+  const whichWrongs = shuffle(KEYS.filter(k=>k.name!==keyData.name&&k.accidentals>0)).slice(0,3).map(k=>k.accidentalList.join(", "));
+  const whichOpts = keyData.accidentals === 0
+    ? shuffle(["None — C major has no sharps or flats","F#","Bb","F#, C#"])
+    : shuffle([whichCorrect,...whichWrongs]);
+  steps.push({ type:"which", question:`Name the ${accWord}:`, options:whichOpts.slice(0,4), correct:whichCorrect });
+
+  shuffle([1,2,3,4,5,6,7]).forEach(num => {
+    const chord = keyData.chords.find(c=>c.num===num);
+    const correct = `${chord.name} ${chord.quality}`;
+    const wrongs = shuffle(KEYS.filter(k=>k.name!==keyData.name)).slice(0,3).map(k=>{const c=k.chords.find(c2=>c2.num===num);return `${c.name} ${c.quality}`;});
+    const ordinal = num===1?"1st":num===2?"2nd":num===3?"3rd":`${num}th`;
+    steps.push({ type:"chord", question:`What is the ${ordinal} chord?`, options:shuffle([correct,...wrongs]), correct, chordNum:num });
+  });
+  return steps;
+}
+
+function logActivity(name, activity) {
+  try {
+    const existing = JSON.parse(localStorage.getItem("c5Log")||"[]");
+    existing.push({student:name, timestamp:new Date().toISOString(), ...activity});
+    localStorage.setItem("c5Log", JSON.stringify(existing));
+  } catch(e){}
+}
+function getStudents() { try { return JSON.parse(localStorage.getItem("c5Students")||"[]"); } catch(e){ return []; } }
+function saveStudents(arr) { try { localStorage.setItem("c5Students", JSON.stringify(arr)); } catch(e){} }
+
+// ============================================================
+// STYLES
+// ============================================================
+const S = `
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Source+Sans+3:wght@300;400;600;700&display=swap');
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  :root{
+    --bg:#0a0a0f;--surface:#13131f;--surface2:#1c1c2e;--border:#2a2a40;
+    --gold:#f0c040;--sharp:#4fc3f7;--flat:#ef9a9a;--green:#81c784;
+    --major:#f0c040;--minor:#7986cb;--dim:#ef5350;
+    --text:#e8e8f0;--muted:#8888aa;--radius:16px;--teacher:#c084fc;
+  }
+  body{font-family:'Source Sans 3',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overscroll-behavior:none;}
+  .shell{max-width:480px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;}
+
+  /* PIN */
+  .pin-screen{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:24px;}
+  .pin-logo{font-family:'Oswald',sans-serif;font-size:48px;font-weight:700;letter-spacing:4px;color:var(--gold);text-align:center;}
+  .pin-sub{font-size:13px;color:var(--muted);letter-spacing:3px;text-transform:uppercase;text-align:center;margin-top:6px;}
+  .pin-dots{display:flex;gap:14px;}
+  .dot{width:16px;height:16px;border-radius:50%;border:2px solid var(--border);background:transparent;transition:all .2s;}
+  .dot.filled{background:var(--gold);border-color:var(--gold);}
+  .dot.error{background:var(--dim);border-color:var(--dim);animation:shake .3s;}
+  @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+  .pin-pad{display:grid;grid-template-columns:repeat(3,72px);gap:12px;}
+  .pin-btn{width:72px;height:72px;border-radius:50%;border:1.5px solid var(--border);background:var(--surface);color:var(--text);font-family:'Oswald',sans-serif;font-size:24px;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;}
+  .pin-btn:active{background:var(--gold);color:var(--bg);transform:scale(.93);}
+  .pin-error{color:var(--dim);font-size:13px;text-align:center;min-height:18px;}
+
+  /* SHARED */
+  .center-screen{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;gap:20px;}
+  .screen-title{font-family:'Oswald',sans-serif;font-size:26px;font-weight:600;color:var(--gold);letter-spacing:2px;text-align:center;}
+  .screen-sub{font-size:14px;color:var(--muted);text-align:center;max-width:280px;line-height:1.5;}
+  .vlist{display:flex;flex-direction:column;gap:10px;width:100%;max-width:320px;}
+  .card-btn{padding:15px 18px;border-radius:var(--radius);border:1.5px solid var(--border);background:var(--surface);color:var(--text);font-size:16px;font-weight:600;cursor:pointer;text-align:left;transition:all .15s;font-family:'Source Sans 3',sans-serif;display:flex;flex-direction:column;gap:3px;}
+  .card-btn:active{border-color:var(--gold);background:var(--surface2);}
+  .card-btn-sub{font-size:12px;font-weight:400;color:var(--muted);}
+  .card-btn.muted{border-style:dashed;color:var(--muted);}
+  .primary-btn{padding:15px;border-radius:var(--radius);border:none;background:var(--gold);color:var(--bg);font-family:'Oswald',sans-serif;font-size:17px;font-weight:700;letter-spacing:2px;cursor:pointer;width:100%;transition:all .15s;}
+  .primary-btn:active{opacity:.85;transform:scale(.98);}
+  .ghost-btn{padding:13px;border-radius:var(--radius);border:1.5px solid var(--border);background:var(--surface);color:var(--muted);font-family:'Oswald',sans-serif;font-size:14px;font-weight:600;letter-spacing:1px;cursor:pointer;width:100%;transition:all .15s;}
+  .ghost-btn:active{border-color:var(--gold);color:var(--gold);}
+  .teacher-btn{padding:13px;border-radius:var(--radius);border:1.5px solid var(--teacher);background:rgba(192,132,252,.08);color:var(--teacher);font-family:'Oswald',sans-serif;font-size:14px;font-weight:600;letter-spacing:1px;cursor:pointer;width:100%;transition:all .15s;}
+  .teacher-btn:active{background:rgba(192,132,252,.2);}
+  .sec-lbl{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);}
+
+  /* QUIZ */
+  .quiz-screen{min-height:100vh;display:flex;flex-direction:column;padding:40px 24px 32px;gap:24px;}
+  .prog-bar{display:flex;gap:8px;}
+  .pip{height:4px;flex:1;border-radius:2px;background:var(--border);transition:background .3s;}
+  .pip.on{background:var(--gold);}
+  .big-q{font-family:'Oswald',sans-serif;font-size:22px;line-height:1.3;color:var(--text);}
+
+  /* HOME */
+  .home-screen{display:flex;flex-direction:column;padding:16px 16px 90px;gap:14px;min-height:100vh;}
+  .top-bar{display:flex;align-items:center;justify-content:space-between;padding:6px 0;}
+  .top-name{font-family:'Oswald',sans-serif;font-size:14px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;}
+  .top-logo{font-family:'Oswald',sans-serif;font-size:20px;font-weight:700;color:var(--gold);letter-spacing:3px;}
+  .circle-wrap{position:relative;width:100%;aspect-ratio:1;max-width:380px;margin:0 auto;}
+  .circle-svg{width:100%;height:100%;}
+  .legend{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;}
+  .leg{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);}
+  .leg-dot{width:9px;height:9px;border-radius:50%;}
+
+  /* TEACHER */
+  .teacher-badge{background:rgba(192,132,252,.12);border:1.5px solid var(--teacher);border-radius:8px;padding:6px 14px;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--teacher);text-align:center;}
+  .locked-display{background:rgba(192,132,252,.08);border:1.5px solid var(--teacher);border-radius:var(--radius);padding:14px;text-align:center;}
+  .locked-name{font-family:'Oswald',sans-serif;font-size:44px;font-weight:700;color:var(--teacher);line-height:1;}
+
+  /* SETTINGS */
+  .settings-screen{display:flex;flex-direction:column;padding:20px 20px 100px;gap:14px;min-height:100vh;}
+  .student-row{display:flex;align-items:center;gap:8px;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:11px 13px;}
+  .name-field{flex:1;background:transparent;border:none;color:var(--text);font-size:15px;font-weight:600;font-family:'Source Sans 3',sans-serif;outline:none;}
+  .pin-field{width:66px;background:var(--surface2);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;font-family:'Oswald',sans-serif;padding:5px 7px;text-align:center;outline:none;}
+  .pin-field:focus{border-color:var(--teacher);}
+  .del-btn{background:none;border:none;color:var(--dim);font-size:18px;cursor:pointer;padding:3px;}
+  .add-btn{padding:11px;border-radius:var(--radius);border:1.5px dashed var(--border);background:transparent;color:var(--muted);font-size:14px;cursor:pointer;text-align:center;font-family:'Source Sans 3',sans-serif;}
+  .save-badge{text-align:center;font-size:12px;color:var(--green);min-height:18px;}
+
+  /* LOOKUP */
+  .lookup-screen{display:flex;flex-direction:column;padding:20px 20px 90px;gap:16px;min-height:100vh;}
+  .key-picker{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;}
+  .key-pick-btn{padding:12px 4px;border-radius:10px;border:1.5px solid var(--border);background:var(--surface);color:var(--text);font-family:'Oswald',sans-serif;font-size:14px;font-weight:700;cursor:pointer;text-align:center;transition:all .15s;}
+  .key-pick-btn:active{transform:scale(.94);}
+  .key-pick-btn.sharp-key{border-color:rgba(79,195,247,.4);color:var(--sharp);}
+  .key-pick-btn.flat-key{border-color:rgba(239,154,154,.4);color:var(--flat);}
+  .key-pick-btn.neither-key{border-color:rgba(165,214,167,.4);color:var(--green);}
+  .key-pick-btn.selected{border-width:2px;background:var(--surface2);}
+  .key-pick-btn.selected.sharp-key{border-color:var(--sharp);}
+  .key-pick-btn.selected.flat-key{border-color:var(--flat);}
+  .key-pick-btn.selected.neither-key{border-color:var(--green);}
+
+  /* CHORD REFERENCE CARD — large, readable */
+  .chord-ref-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:16px;display:flex;flex-direction:column;gap:10px;}
+  .chord-ref-key{font-family:'Oswald',sans-serif;font-size:36px;font-weight:700;color:var(--gold);}
+  .chord-ref-sig{font-size:13px;color:var(--muted);margin-top:-4px;}
+  .chord-ref-grid{display:flex;flex-direction:column;gap:7px;}
+  .chord-ref-row{display:flex;align-items:center;gap:0;border-radius:10px;overflow:hidden;border:1.5px solid var(--border);}
+  .chord-ref-num{width:44px;min-width:44px;padding:12px 0;text-align:center;font-family:'Oswald',sans-serif;font-size:20px;font-weight:700;}
+  .chord-ref-num.Major{background:rgba(240,192,64,.12);color:var(--major);}
+  .chord-ref-num.minor{background:rgba(121,134,203,.12);color:var(--minor);}
+  .chord-ref-num.dim{background:rgba(239,83,80,.12);color:var(--dim);}
+  .chord-ref-name{flex:1;padding:12px 14px;font-size:18px;font-weight:700;color:var(--text);}
+  .chord-ref-quality{padding:12px 14px;font-size:12px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--muted);}
+  .chord-ref-row.worship-1{border-color:var(--gold);}
+  .chord-ref-row.worship-4{border-color:var(--sharp);}
+  .chord-ref-row.worship-5{border-color:var(--green);}
+  .worship-tag{font-size:10px;letter-spacing:1px;color:var(--gold);padding:12px 10px;font-weight:700;}
+
+  /* GAME */
+  .game-screen{display:flex;flex-direction:column;padding:18px 18px 90px;gap:12px;min-height:100vh;}
+  .g-header{display:flex;align-items:center;justify-content:space-between;}
+  .key-hero{font-family:'Oswald',sans-serif;font-size:52px;font-weight:700;color:var(--gold);line-height:1;text-align:center;}
+  .key-hero.t{color:var(--teacher);}
+  .key-sub{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);text-align:center;}
+  .step-prog{display:flex;gap:3px;}
+  .sp{height:6px;flex:1;border-radius:3px;background:var(--border);}
+  .sp.ok{background:var(--green);}
+  .sp.no{background:var(--dim);}
+  .sp.cur{background:var(--gold);}
+  .q-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:16px;}
+  .q-lbl{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:5px;}
+  .q-text{font-family:'Oswald',sans-serif;font-size:20px;color:var(--text);}
+  .ans-list{display:flex;flex-direction:column;gap:8px;}
+  .ans{padding:14px 16px;border-radius:12px;border:1.5px solid var(--border);background:var(--surface);color:var(--text);font-size:15px;font-weight:600;cursor:pointer;text-align:left;transition:all .15s;font-family:'Source Sans 3',sans-serif;}
+  .ans:active{transform:scale(.97);}
+  .ans.reveal{border-color:var(--green);background:rgba(129,199,132,.15);color:var(--green);}
+  .ans.wrong{border-color:var(--dim);background:rgba(239,83,80,.15);color:var(--dim);}
+  .ans:disabled{cursor:default;}
+  .feedback{text-align:center;font-size:16px;font-weight:700;min-height:22px;}
+  .feedback.ok{color:var(--green);}
+  .feedback.no{color:var(--dim);}
+
+  /* VISUAL REINFORCEMENT PANEL */
+  .reinforce{background:var(--surface2);border:1.5px solid var(--border);border-radius:var(--radius);padding:14px;display:flex;flex-direction:column;gap:10px;}
+  .reinforce-title{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);}
+
+  /* Mini circle for reinforcement */
+  .mini-circle-wrap{width:100%;aspect-ratio:1;max-width:240px;margin:0 auto;}
+
+  /* Chord grid in reinforcement — bigger, more readable */
+  .chord-reinforce-grid{display:flex;flex-direction:column;gap:6px;}
+  .cri-row{display:flex;align-items:stretch;border-radius:10px;overflow:hidden;border:1.5px solid var(--border);}
+  .cri-row.w1{border-color:var(--gold);}
+  .cri-row.w4{border-color:var(--sharp);}
+  .cri-row.w5{border-color:var(--green);}
+  .cri-row.hl{border-width:2.5px;border-color:var(--gold);background:rgba(240,192,64,.06);}
+  .cri-num{width:38px;min-width:38px;display:flex;align-items:center;justify-content:center;font-family:'Oswald',sans-serif;font-size:18px;font-weight:700;}
+  .cri-num.Major{background:rgba(240,192,64,.15);color:var(--major);}
+  .cri-num.minor{background:rgba(121,134,203,.15);color:var(--minor);}
+  .cri-num.dim{background:rgba(239,83,80,.15);color:var(--dim);}
+  .cri-name{flex:1;padding:10px 12px;font-size:17px;font-weight:700;color:var(--text);}
+  .cri-q{padding:10px 12px;font-size:12px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;}
+
+  /* accidental list */
+  .acc-list{display:flex;flex-wrap:wrap;gap:8px;}
+  .acc-chip{padding:7px 14px;border-radius:20px;font-family:'Oswald',sans-serif;font-size:16px;font-weight:700;}
+  .acc-chip.sharp{background:rgba(79,195,247,.15);color:var(--sharp);border:1.5px solid rgba(79,195,247,.4);}
+  .acc-chip.flat{background:rgba(239,154,154,.15);color:var(--flat);border:1.5px solid rgba(239,154,154,.4);}
+
+  /* RESULTS */
+  .results-screen{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;gap:16px;text-align:center;}
+  .r-score{font-family:'Oswald',sans-serif;font-size:80px;font-weight:700;color:var(--gold);line-height:1;}
+
+  /* NAV */
+  .nav-bar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:var(--surface);border-top:1px solid var(--border);display:flex;padding:8px 0 14px;z-index:100;}
+  .nav-tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:none;color:var(--muted);font-size:9px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;padding:5px 0;font-family:'Source Sans 3',sans-serif;transition:color .15s;}
+  .nav-tab.active{color:var(--gold);}
+  .nav-tab.t.active{color:var(--teacher);}
+  .nav-tab svg{width:20px;height:20px;}
+
+  .timeout-screen{position:fixed;inset:0;background:#000;z-index:9999;}
+  input{color:var(--text);}
+`;
+
+// ============================================================
+// 15-KEY CIRCLE SVG
+// ============================================================
+function CircleSVG({ activeKey, onTap, teacherMode, mini }) {
+  const cx=160, cy=160, R=mini?148:140, rInner=mini?68:72;
+  const n=CIRCLE_ORDER.length; // 15
+  const activeColor = teacherMode ? "#c084fc" : "#f0c040";
+
+  return (
+    <svg viewBox="0 0 320 320" className="circle-svg">
+      {CIRCLE_ORDER.map((k,i) => {
+        const a1 = (i/n)*2*Math.PI - Math.PI/2;
+        const a2 = ((i+1)/n)*2*Math.PI - Math.PI/2;
+        const r1=rInner+3, r2=R;
+        const path=`M ${cx+r1*Math.cos(a1)} ${cy+r1*Math.sin(a1)} L ${cx+r2*Math.cos(a1)} ${cy+r2*Math.sin(a1)} A ${r2} ${r2} 0 0 1 ${cx+r2*Math.cos(a2)} ${cy+r2*Math.sin(a2)} L ${cx+r1*Math.cos(a2)} ${cy+r1*Math.sin(a2)} A ${r1} ${r1} 0 0 0 ${cx+r1*Math.cos(a1)} ${cy+r1*Math.sin(a1)} Z`;
+        const kd=KEYS.find(x=>x.name===k);
+        const isActive=activeKey===k;
+        const am=(a1+a2)/2;
+        const lr=(r1+r2)/2;
+        const lx=cx+lr*Math.cos(am), ly=cy+lr*Math.sin(am);
+        let isNeighbor=false;
+        if (activeKey && !teacherMode) {
+          const si=CIRCLE_ORDER.indexOf(activeKey);
+          if (i===(si-1+15)%15||i===(si+1)%15) isNeighbor=true;
+        }
+        let fill="#1c1c2e", stroke="#2a2a40";
+        if (kd?.side==="sharp") fill=isActive?"rgba(79,195,247,.35)":"rgba(79,195,247,.07)";
+        if (kd?.side==="flat")  fill=isActive?"rgba(239,154,154,.35)":"rgba(239,154,154,.07)";
+        if (kd?.side==="neither") fill=isActive?"rgba(165,214,167,.35)":"rgba(165,214,167,.07)";
+        if (isActive) stroke=activeColor;
+        if (isNeighbor) stroke="#81c784";
+        const fs = k.length>2?"8":k.length>1?"10":"12";
+        return (
+          <g key={k} onClick={()=>onTap&&onTap(k)} style={{cursor:onTap?"pointer":"default"}}>
+            <path d={path} fill={fill} stroke={stroke} strokeWidth={isActive?2.5:1}/>
+            <text x={lx} y={ly} textAnchor="middle" dominantBaseline="central"
+              fontSize={fs} fontWeight="700" fontFamily="Oswald,sans-serif"
+              fill={isActive?activeColor:isNeighbor?"#81c784":"#e8e8f0"}>
+              {k}
+            </text>
+          </g>
+        );
+      })}
+      <circle cx={cx} cy={cy} r={rInner-1} fill="#13131f" stroke="#2a2a40" strokeWidth="1"/>
+      {!mini && <>
+        <text x={cx} y={cy-8} textAnchor="middle" fontSize="9" fill="#8888aa" fontFamily="Oswald" letterSpacing="2">CIRCLE OF</text>
+        <text x={cx} y={cy+8} textAnchor="middle" fontSize="9" fill="#8888aa" fontFamily="Oswald" letterSpacing="2">FIFTHS</text>
+      </>}
+    </svg>
+  );
+}
+
+// ============================================================
+// CHORD REFERENCE — large readable card
+// ============================================================
+function ChordRefCard({ keyData, highlightNum }) {
+  if (!keyData) return null;
+  const accWord = keyData.accidentalType==="sharp"?"sharp":(keyData.accidentalType==="flat"?"flat":null);
+  const sig = keyData.accidentals===0 ? "No sharps or flats" : `${keyData.accidentals} ${accWord}${keyData.accidentals>1?"s":""}: ${keyData.accidentalList.join(", ")}`;
+  return (
+    <div className="chord-ref-card">
+      <div>
+        <div className="chord-ref-key">{keyData.name} Major</div>
+        <div className="chord-ref-sig">{sig}</div>
+      </div>
+      <div className="chord-ref-grid">
+        {keyData.chords.map(c => {
+          let wCls = "";
+          if (c.num===1) wCls="worship-1"; else if (c.num===4) wCls="worship-4"; else if (c.num===5) wCls="worship-5";
+          const isHl = highlightNum===c.num;
+          return (
+            <div key={c.num} className={`chord-ref-row ${wCls} ${isHl?"hl":""}`}>
+              <div className={`chord-ref-num ${c.quality}`}>{c.num}</div>
+              <div className="chord-ref-name">{c.name}</div>
+              <div className="chord-ref-quality">{c.quality==="dim"?"diminished":c.quality}</div>
+              {(c.num===1||c.num===4||c.num===5) && <div className="worship-tag">{c.num===1?"1":c.num===4?"4":"5"}</div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// VISUAL REINFORCEMENT — shown after every answer
+// ============================================================
+function Reinforce({ step, keyData, isCorrect }) {
+  if (!step||!keyData) return null;
+  const accWord = keyData.accidentalType==="sharp"?"sharps":(keyData.accidentalType==="flat"?"flats":"sharps or flats");
+
+  if (step.type==="side"||step.type==="count") {
+    return (
+      <div className="reinforce">
+        <div className="reinforce-title">
+          {isCorrect?"✓ Confirmed on the circle":"↓ Find it on the circle"}
+        </div>
+        <div className="mini-circle-wrap">
+          <CircleSVG activeKey={keyData.name} teacherMode={false} mini={true}/>
+        </div>
+        <div style={{fontSize:13,color:"var(--muted)",textAlign:"center",lineHeight:1.6}}>
+          <span style={{color:keyData.side==="sharp"?"var(--sharp)":keyData.side==="flat"?"var(--flat)":"var(--green)",fontWeight:700}}>
+            {keyData.name}
+          </span> is on the <strong style={{color:"var(--text)"}}>{keyData.side==="neither"?"neither side (C — no accidentals)":keyData.side+" side"}</strong>
+          {keyData.accidentals>0 && <> with <strong style={{color:"var(--text)"}}>{keyData.accidentals} {accWord}</strong></>}
+        </div>
+      </div>
+    );
+  }
+
+  if (step.type==="which") {
+    return (
+      <div className="reinforce">
+        <div className="reinforce-title">
+          {isCorrect?"✓ The accidentals in "+keyData.name:"↓ Accidentals in "+keyData.name+" Major"}
+        </div>
+        {keyData.accidentals===0 ? (
+          <div style={{fontSize:15,color:"var(--green)",fontWeight:700,textAlign:"center"}}>No sharps or flats</div>
+        ) : (
+          <div className="acc-list">
+            {keyData.accidentalList.map(a=>(
+              <div key={a} className={`acc-chip ${keyData.accidentalType}`}>{a}</div>
+            ))}
+          </div>
+        )}
+        <div className="mini-circle-wrap">
+          <CircleSVG activeKey={keyData.name} teacherMode={false} mini={true}/>
+        </div>
+      </div>
+    );
+  }
+
+  // chord type
+  return (
+    <div className="reinforce">
+      <div className="reinforce-title">
+        {isCorrect?"✓ All chords in "+keyData.name+" Major":"↓ All chords in "+keyData.name+" Major"}
+      </div>
+      <div className="chord-reinforce-grid">
+        {keyData.chords.map(c=>{
+          let wCls="";
+          if (c.num===1) wCls="w1"; else if (c.num===4) wCls="w4"; else if (c.num===5) wCls="w5";
+          const isHl=step.chordNum===c.num;
+          return (
+            <div key={c.num} className={`cri-row ${wCls} ${isHl?"hl":""}`}>
+              <div className={`cri-num ${c.quality}`}>{c.num}</div>
+              <div className="cri-name">{c.name}</div>
+              <div className="cri-q">{c.quality==="dim"?"dim":c.quality==="minor"?"minor":"Major"}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// APP
+// ============================================================
+export default function App() {
+  const [screen, setScreen]         = useState("pin");
+  const [pin, setPin]               = useState("");
+  const [pinError, setPinError]     = useState(false);
+  const [isTeacher, setIsTeacher]   = useState(false);
+  const [studentName, setStudentName] = useState("");
+  const [learningStyle, setLearningStyle] = useState(null);
+  const [quizAnswers, setQuizAnswers] = useState([]);
+  const [quizQ, setQuizQ]           = useState(0);
+  const [lockedKey, setLockedKey]   = useState(null);
+  const [students, setStudents]     = useState(getStudents);
+  const [saveBadge, setSaveBadge]   = useState("");
+  const [lookupKey, setLookupKey]   = useState(null);
+  const [currentKey, setCurrentKey] = useState(null);
+  const [steps, setSteps]           = useState([]);
+  const [stepIdx, setStepIdx]       = useState(0);
+  const [selectedAns, setSelectedAns] = useState(null);
+  const [answered, setAnswered]     = useState(false);
+  const [stepResults, setStepResults] = useState([]);
+  const [activeTab, setActiveTab]   = useState("circle");
+
+  const timer = useRef(null);
+  const resetTimer = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    if (screen!=="pin"&&screen!=="timeout")
+      timer.current = setTimeout(()=>setScreen("timeout"), 15*60*1000);
+  }, [screen]);
+  useEffect(() => {
+    const evts=["touchstart","touchmove","click","keydown"];
+    evts.forEach(e=>window.addEventListener(e,resetTimer));
+    resetTimer();
+    return ()=>{evts.forEach(e=>window.removeEventListener(e,resetTimer));if(timer.current)clearTimeout(timer.current);};
+  }, [resetTimer]);
+
+  // PIN
+  const handlePin = (d) => {
+    const next=pin+d; if (next.length>4) return;
+    setPin(next); setPinError(false);
+    if (next.length===4) {
+      setTimeout(()=>{
+        if (next===TEACHER_PIN) { setPin(""); setIsTeacher(true); setScreen("teacherHome"); }
+        else {
+          const found=students.find(s=>s.pin===next);
+          if (found) {
+            setPin(""); setIsTeacher(false); setStudentName(found.name);
+            logActivity(found.name,{type:"login"});
+            const saved=localStorage.getItem(`style_${found.name}`);
+            if (saved){setLearningStyle(saved);setScreen("home");}
+            else setScreen("stylePick");
+          } else { setPinError(true); setTimeout(()=>{setPin("");setPinError(false);},700); }
+        }
+      },150);
+    }
+  };
+
+  const handleStyle = (s) => {
+    if (s==="quiz"){setQuizAnswers([]);setQuizQ(0);setScreen("quiz");return;}
+    setLearningStyle(s); localStorage.setItem(`style_${studentName}`,s);
+    logActivity(studentName,{type:"style_set",style:s}); setScreen("home");
+  };
+
+  const handleQuizAns = (s) => {
+    const next=[...quizAnswers,s]; setQuizAnswers(next);
+    if (quizQ+1<LEARNING_STYLE_QUIZ.length){setQuizQ(q=>q+1);return;}
+    const tally={visual:0,kinesthetic:0,auditory:0};
+    next.forEach(x=>tally[x]++);
+    const winner=Object.entries(tally).sort((a,b)=>b[1]-a[1])[0][0];
+    setLearningStyle(winner); localStorage.setItem(`style_${studentName}`,winner);
+    logActivity(studentName,{type:"quiz_complete",style:winner}); setScreen("home");
+  };
+
+  const startRound = (keyOverride) => {
+    const key=keyOverride||(lockedKey?lockedKey:null)||pickWeightedKey(currentKey?.name);
+    setCurrentKey(key); setSteps(buildKeyRound(key));
+    setStepIdx(0); setSelectedAns(null); setAnswered(false); setStepResults([]);
+    setScreen("game"); logActivity(studentName||"teacher",{type:"round_start",key:key.name});
+  };
+
+  const handleAnswer = (opt) => {
+    if (answered) return;
+    setSelectedAns(opt); setAnswered(true);
+    setStepResults(r=>[...r, opt===steps[stepIdx].correct]);
+  };
+
+  const handleNext = () => {
+    const next=stepIdx+1;
+    if (next>=steps.length){
+      logActivity(studentName||"teacher",{type:"round_complete",key:currentKey.name,correct:stepResults.filter(Boolean).length,total:steps.length});
+      setScreen("results");
+    } else { setStepIdx(next); setSelectedAns(null); setAnswered(false); }
+  };
+
+  const updateStudent=(idx,field,val)=>setStudents(s=>s.map((x,i)=>i===idx?{...x,[field]:val}:x));
+  const saveStudentsFn=()=>{ saveStudents(students); setSaveBadge("Saved ✓"); setTimeout(()=>setSaveBadge(""),2000); };
+
+  const step=steps[stepIdx];
+  const circleIdx=currentKey?CIRCLE_ORDER.indexOf(currentKey.name):-1;
+  const fourKey=circleIdx>=0?CIRCLE_ORDER[(circleIdx-1+15)%15]:null;
+  const fiveKey=circleIdx>=0?CIRCLE_ORDER[(circleIdx+1)%15]:null;
+  const isRight=answered&&selectedAns===step?.correct;
+  const styleLabel={visual:"👁 Visual",kinesthetic:"🤸 Hands-On",auditory:"👂 Listening"};
+
+  const goHome=()=>setScreen(isTeacher?"teacherHome":"home");
+
+  // NAV BARS
+  const StudentNav = ({active}) => (
+    <nav className="nav-bar">
+      <button className={`nav-tab ${active==="circle"?"active":""}`} onClick={()=>{setActiveTab("circle");setScreen("home");}}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/></svg>Circle
+      </button>
+      <button className={`nav-tab ${active==="practice"?"active":""}`} onClick={()=>startRound()}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>Practice
+      </button>
+      <button className={`nav-tab ${active==="lookup"?"active":""}`} onClick={()=>{setActiveTab("lookup");setScreen("lookup");}}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>Key Lookup
+      </button>
+    </nav>
+  );
+
+  const TeacherNav = ({active}) => (
+    <nav className="nav-bar">
+      <button className={`nav-tab t ${active==="circle"?"active":""}`} onClick={()=>setScreen("teacherHome")}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/></svg>Circle
+      </button>
+      <button className={`nav-tab t ${active==="settings"?"active":""}`} onClick={()=>setScreen("settings")}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>Settings
+      </button>
+    </nav>
+  );
+
+  // ============================================================
+  if (screen==="timeout") return <><style>{S}</style><div className="timeout-screen"/></>;
+
+  if (screen==="pin") return (
+    <><style>{S}</style>
+    <div className="pin-screen">
+      <div><div className="pin-logo">♩♪♫♬</div><div className="pin-sub">Circle of Fifths</div></div>
+      <div className="pin-dots">{Array.from({length:4}).map((_,i)=><div key={i} className={`dot ${i<pin.length?(pinError?"error":"filled"):""}`}/>)}</div>
+      <div className="pin-pad">
+        {[1,2,3,4,5,6,7,8,9].map(d=><button key={d} className="pin-btn" onClick={()=>handlePin(String(d))}>{d}</button>)}
+        <div/><button className="pin-btn" onClick={()=>handlePin("0")}>0</button>
+        <button className="pin-btn" style={{fontSize:18,color:"var(--muted)"}} onClick={()=>setPin(p=>p.slice(0,-1))}>⌫</button>
+      </div>
+      <div className="pin-error">{pinError?"Incorrect PIN — try again":""}</div>
+    </div></>
+  );
+
+  if (screen==="stylePick") return (
+    <><style>{S}</style>
+    <div className="center-screen">
+      <div className="screen-title">How do you learn best?</div>
+      <div className="screen-sub">Pick what feels most like you.</div>
+      <div className="vlist">
+        <button className="card-btn" onClick={()=>handleStyle("visual")}>👁 Visual<span className="card-btn-sub">Charts, patterns, seeing things laid out</span></button>
+        <button className="card-btn" onClick={()=>handleStyle("kinesthetic")}>🤸 Hands-On<span className="card-btn-sub">Tapping, building, doing things yourself</span></button>
+        <button className="card-btn" onClick={()=>handleStyle("auditory")}>👂 Listening<span className="card-btn-sub">Hearing it explained, reading clues out loud</span></button>
+        <button className="card-btn muted" onClick={()=>handleStyle("quiz")}>🤷 Not sure — take the quiz<span className="card-btn-sub">4 quick questions to figure it out</span></button>
+      </div>
+    </div></>
+  );
+
+  if (screen==="quiz") {
+    const q=LEARNING_STYLE_QUIZ[quizQ];
+    return (
+      <><style>{S}</style>
+      <div className="shell">
+        <div className="quiz-screen">
+          <div className="prog-bar">{LEARNING_STYLE_QUIZ.map((_,i)=><div key={i} className={`pip ${i<=quizQ?"on":""}`}/>)}</div>
+          <div style={{fontSize:12,color:"var(--muted)",letterSpacing:2,textTransform:"uppercase"}}>How Do You Learn?</div>
+          <div className="big-q">{q.q}</div>
+          <div className="vlist">{q.options.map(o=><button key={o.text} className="card-btn" onClick={()=>handleQuizAns(o.style)}>{o.text}</button>)}</div>
+        </div>
+      </div></>
+    );
+  }
+
+  if (screen==="teacherHome") return (
+    <><style>{S}</style>
+    <div className="shell">
+      <div className="home-screen">
+        <div className="top-bar">
+          <div className="top-name" style={{color:"var(--teacher)"}}>Teacher</div>
+          <div className="top-logo">C5</div>
+          <button className="ghost-btn" style={{width:"auto",padding:"4px 12px",fontSize:12}} onClick={()=>{setIsTeacher(false);setLockedKey(null);setScreen("pin");}}>Exit</button>
+        </div>
+        <div className="teacher-badge">🎓 Teacher Mode</div>
+        {lockedKey ? (
+          <div className="locked-display">
+            <div className="locked-name">{lockedKey.name}</div>
+            <div style={{fontSize:11,letterSpacing:2,textTransform:"uppercase",color:"var(--muted)",marginTop:4}}>Locked Key</div>
+            <button className="ghost-btn" style={{marginTop:10}} onClick={()=>setLockedKey(null)}>Unlock — use weighted random</button>
+          </div>
+        ) : (
+          <div style={{textAlign:"center",fontSize:13,color:"var(--muted)",lineHeight:1.6}}>
+            Tap a key on the circle to lock it for students.<br/>
+            <span style={{fontSize:11,opacity:.7}}>No key locked — 70% worship keys</span>
+          </div>
+        )}
+        <div className="circle-wrap">
+          <CircleSVG activeKey={lockedKey?.name} onTap={k=>{const kd=KEYS.find(x=>x.name===k);setLockedKey(kd);}} teacherMode={true}/>
+        </div>
+        <div className="legend">
+          <div className="leg"><div className="leg-dot" style={{background:"rgba(79,195,247,.6)"}}/> Sharp</div>
+          <div className="leg"><div className="leg-dot" style={{background:"rgba(239,154,154,.6)"}}/> Flat</div>
+          <div className="leg"><div className="leg-dot" style={{background:"rgba(192,132,252,.6)"}}/> Locked</div>
+        </div>
+        <button className="primary-btn" onClick={()=>startRound()}>🎮 Preview This Key</button>
+        <button className="teacher-btn" onClick={()=>setScreen("settings")}>⚙️ Manage Students & PINs</button>
+      </div>
+      <TeacherNav active="circle"/>
+    </div></>
+  );
+
+  if (screen==="settings") return (
+    <><style>{S}</style>
+    <div className="shell">
+      <div className="settings-screen">
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <button className="ghost-btn" style={{width:"auto",padding:"6px 14px"}} onClick={()=>setScreen("teacherHome")}>← Back</button>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,color:"var(--teacher)",letterSpacing:2}}>Students & PINs</div>
+        </div>
+        <div className="sec-lbl">Name + 4-digit PIN per student</div>
+        {students.map((s,i)=>(
+          <div key={i} className="student-row">
+            <input className="name-field" placeholder="Student name" value={s.name} onChange={e=>updateStudent(i,"name",e.target.value)}/>
+            <input className="pin-field" placeholder="PIN" maxLength={4} value={s.pin} onChange={e=>updateStudent(i,"pin",e.target.value.replace(/\D/g,""))}/>
+            <button className="del-btn" onClick={()=>setStudents(s=>s.filter((_,j)=>j!==i))}>✕</button>
+          </div>
+        ))}
+        <button className="add-btn" onClick={()=>setStudents(s=>[...s,{name:"",pin:""}])}>+ Add Student</button>
+        <button className="teacher-btn" onClick={saveStudentsFn}>Save Changes</button>
+        <div className="save-badge">{saveBadge}</div>
+        <div className="sec-lbl" style={{marginTop:8}}>Teacher PIN</div>
+        <div style={{fontSize:13,color:"var(--muted)"}}>Set at the top of the code file — look for <code style={{background:"var(--surface2)",padding:"2px 6px",borderRadius:4,fontSize:12}}>TEACHER_PIN</code></div>
+      </div>
+      <TeacherNav active="settings"/>
+    </div></>
+  );
+
+  // LOOKUP
+  if (screen==="lookup") {
+    const lkd = lookupKey ? KEYS.find(k=>k.name===lookupKey) : null;
+    return (
+      <><style>{S}</style>
+      <div className="shell">
+        <div className="lookup-screen">
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,color:"var(--gold)",letterSpacing:2}}>Key Lookup</div>
+          <div style={{fontSize:13,color:"var(--muted)"}}>Pick the key your song is in — see all the chords.</div>
+          <div className="key-picker">
+            {KEYS.map(k=>{
+              const cls=k.side==="sharp"?"sharp-key":k.side==="flat"?"flat-key":"neither-key";
+              return (
+                <button key={k.name} className={`key-pick-btn ${cls} ${lookupKey===k.name?"selected":""}`} onClick={()=>setLookupKey(k.name)}>
+                  {k.name}
+                </button>
+              );
+            })}
+          </div>
+          {lkd && <ChordRefCard keyData={lkd} highlightNum={null}/>}
+        </div>
+        <StudentNav active="lookup"/>
+      </div></>
+    );
+  }
+
+  // RESULTS
+  if (screen==="results") {
+    const correct=stepResults.filter(Boolean).length;
+    const total=steps.length;
+    const p=Math.round((correct/total)*100);
+    const msg=p===100?"Perfect round! 🔥 You nailed every question.":p>=80?"Really strong. Keep going — it's sticking.":p>=60?"Good effort. Try this key again and watch it improve.":"Keep at it — every rep builds the memory.";
+    return (
+      <><style>{S}</style>
+      <div className="results-screen">
+        <div style={{fontSize:13,letterSpacing:3,color:"var(--muted)",textTransform:"uppercase"}}>{studentName||"Teacher"}</div>
+        <div style={{fontSize:14,color:"var(--muted)"}}>Key of {currentKey?.name} Major</div>
+        <div className="r-score">{p}%</div>
+        <div style={{fontSize:14,color:"var(--muted)"}}>{correct} of {total} correct</div>
+        <div style={{fontSize:17,color:"var(--text)",maxWidth:280,lineHeight:1.5,textAlign:"center"}}>{msg}</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10,width:"100%",maxWidth:300}}>
+          <button className="primary-btn" onClick={()=>startRound()}>{lockedKey?`Practice ${lockedKey.name} Again`:"Next Key →"}</button>
+          {!lockedKey&&<button className="ghost-btn" onClick={()=>startRound(currentKey)}>Try {currentKey?.name} Again</button>}
+          <button className="ghost-btn" onClick={goHome}>Back to Circle</button>
+        </div>
+      </div></>
+    );
+  }
+
+  // GAME
+  if (screen==="game"&&step) {
+    const phase=stepIdx<3?"nav":"chord";
+    const total=steps.length;
+    return (
+      <><style>{S}</style>
+      <div className="shell">
+        <div className="game-screen">
+          <div className="g-header">
+            <button style={{background:"none",border:"none",color:"var(--muted)",fontSize:14,cursor:"pointer",fontFamily:"'Source Sans 3',sans-serif"}} onClick={goHome}>← Exit</button>
+            <div>
+              <div className={`key-hero ${isTeacher?"t":""}`}>{currentKey.name}</div>
+              <div className="key-sub">Major Key{lockedKey?" · Locked":""}</div>
+            </div>
+            <div style={{fontSize:12,color:"var(--muted)",textAlign:"right"}}>{stepIdx+1}<span style={{color:"var(--border)"}}>/{total}</span></div>
+          </div>
+
+          <div className="step-prog">
+            {steps.map((_,i)=>{let c="sp";if(i<stepIdx)c+=stepResults[i]?" ok":" no";else if(i===stepIdx)c+=" cur";return <div key={i} className={c}/>;}) }
+          </div>
+
+          <div className="sec-lbl">{phase==="nav"?`Step ${stepIdx+1} of 3 — Key Signature`:`Chord ${stepIdx-2} of 7 — ${currentKey.name} Major`}</div>
+
+          <div className="q-card">
+            <div className="q-lbl">{phase==="nav"?"Key Navigation":"Chord Quality"}</div>
+            <div className="q-text">{step.question}</div>
+          </div>
+
+          <div className="ans-list">
+            {step.options.map(opt=>{
+              let cls="ans";
+              if(answered){if(opt===step.correct)cls+=" reveal";else if(opt===selectedAns)cls+=" wrong";}
+              return <button key={opt} className={cls} onClick={()=>handleAnswer(opt)} disabled={answered}>{opt}</button>;
+            })}
+          </div>
+
+          <div className={`feedback ${answered?(isRight?"ok":"no"):""}`}>
+            {answered?(isRight?"✓ Correct!":"✗  "+step.correct):""}
+          </div>
+
+          {/* VISUAL REINFORCEMENT — always shown after answer */}
+          {answered && <Reinforce step={step} keyData={currentKey} isCorrect={isRight}/>}
+
+          {/* Circle 4/5 shortcut — after step 3 */}
+          {answered&&phase==="nav"&&stepIdx===2&&(
+            <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:12,padding:"12px 14px",background:"var(--surface)",borderRadius:"var(--radius)",border:"1.5px solid var(--border)"}}>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:26,fontWeight:700,color:"var(--sharp)"}}>{fourKey}</div>
+                <div style={{fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--muted)",marginTop:2}}>← step back</div>
+                <div style={{fontSize:9,letterSpacing:1,color:"var(--sharp)"}}>= the 4 chord</div>
+              </div>
+              <div style={{fontSize:14,color:"var(--muted)"}}>◀ {currentKey.name} ▶</div>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:26,fontWeight:700,color:"var(--green)"}}>{fiveKey}</div>
+                <div style={{fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--muted)",marginTop:2}}>step forward →</div>
+                <div style={{fontSize:9,letterSpacing:1,color:"var(--green)"}}>= the 5 chord</div>
+              </div>
+            </div>
+          )}
+
+          {answered&&<button className="primary-btn" onClick={handleNext}>{stepIdx+1>=total?"See Results →":"Next →"}</button>}
+        </div>
+        {isTeacher ? <TeacherNav active="practice"/> : <StudentNav active="practice"/>}
+      </div></>
+    );
+  }
+
+  // STUDENT HOME
+  return (
+    <><style>{S}</style>
+    <div className="shell">
+      <div className="home-screen">
+        <div className="top-bar">
+          <div className="top-name">{studentName}</div>
+          <div className="top-logo">C5</div>
+          <div style={{fontSize:11,color:"var(--muted)"}}>{styleLabel[learningStyle]||""}</div>
+        </div>
+        <div className="circle-wrap"><CircleSVG activeKey={currentKey?.name} teacherMode={false}/></div>
+        <div className="legend">
+          <div className="leg"><div className="leg-dot" style={{background:"rgba(79,195,247,.6)"}}/> Sharp keys</div>
+          <div className="leg"><div className="leg-dot" style={{background:"rgba(239,154,154,.6)"}}/> Flat keys</div>
+          <div className="leg"><div className="leg-dot" style={{background:"#81c784"}}/> 4 & 5 neighbors</div>
+        </div>
+        <div style={{textAlign:"center",fontSize:12,color:"var(--muted)"}}>One step back = the 4 · One step forward = the 5</div>
+        <button className="primary-btn" onClick={()=>startRound()}>🎮 Start Practice</button>
+        <button className="ghost-btn" onClick={()=>{setActiveTab("lookup");setScreen("lookup");}}>🔍 Look Up a Key</button>
+        <button className="ghost-btn" onClick={()=>setScreen("stylePick")}>Change Learning Style</button>
+      </div>
+      <StudentNav active="circle"/>
+    </div></>
+  );
+}
