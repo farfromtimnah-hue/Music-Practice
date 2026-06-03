@@ -108,14 +108,20 @@ const countCorrect = String(keyData.accidentals);
 const wrongCounts = shuffle([0,1,2,3,4,5,6,7].filter(n=>n!==keyData.accidentals)).slice(0,3).map(String);
 steps.push({ type:"count", question:`How many ${accWord} does it have?`, options:shuffle([countCorrect,...wrongCounts]), correct:countCorrect });
 
-// UPGRADED: multi-select by note name instead of multiple-choice text
+// UPGRADED: multi-select by full accidental name (e.g. F# / Bb), buttons match the key's accidental type
 const isNone = keyData.accidentals === 0;
-const noteLetters = keyData.accidentalList.map(a => a[0]); // e.g. "F#" → "F", "Bb" → "B"
 const accType = keyData.accidentalType; // "sharp", "flat", or null
+const whichOptions = accType === "sharp"
+  ? ["A#","B#","C#","D#","E#","F#","G#"]
+  : accType === "flat"
+  ? ["Ab","Bb","Cb","Db","Eb","Fb","Gb"]
+  : ["A","B","C","D","E","F","G"];
+// correct is the actual accidentalList (already full names: "F#", "Bb", etc.)
+const whichCorrect = keyData.accidentalList.slice(); // e.g. ["F#","C#"] or ["Bb","Eb"]
 const whichQ = isNone
   ? "This key has no sharps or flats — tap Check Answer to confirm"
   : `Which notes are ${accType} in the key of ${keyData.name}?`;
-steps.push({ type:"whichSelect", question:whichQ, options:["A","B","C","D","E","F","G"], correct:noteLetters, isNone });
+steps.push({ type:"whichSelect", question:whichQ, options:whichOptions, correct:whichCorrect, isNone });
 
 // NEW: multi-select chord quality theory question
 steps.push({

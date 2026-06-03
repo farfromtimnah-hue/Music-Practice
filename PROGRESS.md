@@ -1,6 +1,30 @@
 # Music Practice App — Change Log
 
 ---
+## 2026-06-02 — Phase 2 Fix: Sharps/Flats Button Labels
+
+### What Was Changed
+- `src/App.jsx` — updated the `whichSelect` step inside `buildKeyRound()` (lines ~112–121)
+
+### What Was Added
+- `whichOptions` now derives the 7 button labels from `accidentalType`:
+  - Sharp keys → buttons show `A# B# C# D# E# F# G#`
+  - Flat keys → buttons show `Ab Bb Cb Db Eb Fb Gb`
+  - C major (no accidentals) → buttons show plain `A B C D E F G`, all disabled
+- `whichCorrect` now uses `keyData.accidentalList` directly (e.g. `["F#","C#"]`, `["Bb"]`) instead of stripping to bare note letters — so selected values match button labels exactly
+
+### Known Issues or Limitations
+- None noted
+
+### Manual Steps Required
+- Fix npm cache permissions if not already done: `sudo chown -R 501:20 "/Users/nicolel/.npm"`
+- Then: `cd ~/Music-Practice && npm install && git push`
+- GitHub Actions deploys automatically after push
+
+### Next Phase
+- Phase 3: Portuguese note names quiz (all students)
+
+---
 ## 2026-06-02 — Phase 1 & 2: Hardcoded students + upgraded quiz questions
 
 ### What Was Changed
