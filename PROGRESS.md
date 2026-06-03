@@ -1,6 +1,27 @@
 # Music Practice App — Change Log
 
 ---
+## 2026-06-03 — Phase 3 Fix: Teacher Mode Visibility
+
+### What Was Changed
+- `src/App.jsx` — added two buttons to the `teacherHome` screen render (lines ~849–851)
+
+### What Was Added
+- "🔍 Look Up a Key" ghost button on teacher home → navigates to the existing `lookup` screen
+- "🇧🇷 Notas em Português" ghost button on teacher home → navigates to the existing `ptModeSelect` screen
+- Both buttons sit between "Preview This Key" and "View Students", matching the ordering on the student home screen
+
+### Known Issues or Limitations
+- The `lookup` screen always renders `StudentNav` at the bottom. When a teacher navigates there from teacher home they will see the student nav bar instead of the teacher one. This is a pre-existing structural limitation and was out of scope for this fix per instructions.
+
+### Manual Steps Required
+- `cd ~/Music-Practice && git push`
+- GitHub Actions deploys automatically after push
+
+### Next Phase
+- Phase 4: Bass fretboard quiz for Bernardo (open strings + first 7 frets, 4 strings)
+
+---
 ## 2026-06-03 — Phase 3: Portuguese Note Names Quiz
 
 ### What Was Changed

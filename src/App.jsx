@@ -847,6 +847,8 @@ Tap a key on the circle to lock it for students.<br/>
 <div className="leg"><div className="leg-dot" style={{background:"rgba(192,132,252,.6)"}}/> Locked</div>
 </div>
 <button className="primary-btn" onClick={()=>startRound()}>🎮 Preview This Key</button>
+<button className="ghost-btn" onClick={()=>{setActiveTab("lookup");setScreen("lookup");}}>🔍 Look Up a Key</button>
+<button className="ghost-btn" onClick={()=>setScreen("ptModeSelect")}>🇧🇷 Notas em Português</button>
 <button className="teacher-btn" onClick={()=>setScreen("settings")}>⚙️ View Students</button>
 </div>
 <TeacherNav active="circle"/>
