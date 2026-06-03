@@ -1,9 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
 // ============================================================
-// 👇 TEACHER PIN — change this
+// TEACHER PIN
 // ============================================================
 const TEACHER_PIN = "9999";
+
+// ============================================================
+// HARDCODED STUDENTS
+// ============================================================
+const STUDENTS = {
+  Bernardo: { pin: "2847", instrument: "bass" },
+  Julia:    { pin: "5913", instrument: "guitar" },
+  Samuel:   { pin: "7361", instrument: "keys" },
+};
 
 // ============================================================
 // ALL 15 KEYS — enharmonics are fully separate entries
@@ -84,6 +93,10 @@ const pool = Math.random() < 0.7 ? worship : other;
 return pool[Math.floor(Math.random() * pool.length)];
 }
 
+function arraysEqual(a, b) {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
 function buildKeyRound(keyData) {
 const steps = [];
 const accWord = keyData.accidentalType === "sharp" ? "sharps" : keyData.accidentalType === "flat" ? "flats" : "sharps or flats";
@@ -95,12 +108,23 @@ const countCorrect = String(keyData.accidentals);
 const wrongCounts = shuffle([0,1,2,3,4,5,6,7].filter(n=>n!==keyData.accidentals)).slice(0,3).map(String);
 steps.push({ type:"count", question:`How many ${accWord} does it have?`, options:shuffle([countCorrect,...wrongCounts]), correct:countCorrect });
 
-const whichCorrect = keyData.accidentals === 0 ? "None — C major has no sharps or flats" : keyData.accidentalList.join(", ");
-const whichWrongs = shuffle(KEYS.filter(k=>k.name!==keyData.name&&k.accidentals>0)).slice(0,3).map(k=>k.accidentalList.join(", "));
-const whichOpts = keyData.accidentals === 0
-? shuffle(["None — C major has no sharps or flats","F#","Bb","F#, C#"])
-: shuffle([whichCorrect,...whichWrongs]);
-steps.push({ type:"which", question:`Name the ${accWord}:`, options:whichOpts.slice(0,4), correct:whichCorrect });
+// UPGRADED: multi-select by note name instead of multiple-choice text
+const isNone = keyData.accidentals === 0;
+const noteLetters = keyData.accidentalList.map(a => a[0]); // e.g. "F#" → "F", "Bb" → "B"
+const accType = keyData.accidentalType; // "sharp", "flat", or null
+const whichQ = isNone
+  ? "This key has no sharps or flats — tap Check Answer to confirm"
+  : `Which notes are ${accType} in the key of ${keyData.name}?`;
+steps.push({ type:"whichSelect", question:whichQ, options:["A","B","C","D","E","F","G"], correct:noteLetters, isNone });
+
+// NEW: multi-select chord quality theory question
+steps.push({
+  type:"majorSelect",
+  question:"Which chord numbers are MAJOR in a major key?",
+  options:["1","2","3","4","5","6","7"],
+  correct:["1","4","5"],
+  isNone:false,
+});
 
 shuffle([1,2,3,4,5,6,7]).forEach(num => {
 const chord = keyData.chords.find(c=>c.num===num);
@@ -119,8 +143,6 @@ existing.push({student:name, timestamp:new Date().toISOString(), ...activity});
 localStorage.setItem("c5Log", JSON.stringify(existing));
 } catch(e){}
 }
-function getStudents() { try { return JSON.parse(localStorage.getItem("c5Students")||"[]"); } catch(e){ return []; } }
-function saveStudents(arr) { try { localStorage.setItem("c5Students", JSON.stringify(arr)); } catch(e){} }
 
 // ============================================================
 // STYLES
@@ -137,10 +159,20 @@ const S = `
 body{font-family:'Source Sans 3',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overscroll-behavior:none;}
 .shell{max-width:480px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;}
 
+/* NAME SELECT */
+.name-screen{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:24px;}
+.name-list{display:flex;flex-direction:column;gap:10px;width:100%;max-width:320px;}
+.name-btn{padding:18px 20px;border-radius:var(--radius);border:1.5px solid var(--border);background:var(--surface);color:var(--text);font-family:'Oswald',sans-serif;font-size:20px;font-weight:600;letter-spacing:2px;cursor:pointer;text-align:center;transition:all .15s;}
+.name-btn:active{border-color:var(--gold);background:var(--surface2);color:var(--gold);}
+.name-divider{width:100%;max-width:320px;display:flex;align-items:center;gap:10px;}
+.name-divider-line{flex:1;height:1px;background:var(--border);}
+.name-divider-text{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);}
+
 /* PIN */
 .pin-screen{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:24px;}
 .pin-logo{font-family:'Oswald',sans-serif;font-size:48px;font-weight:700;letter-spacing:4px;color:var(--gold);text-align:center;}
 .pin-sub{font-size:13px;color:var(--muted);letter-spacing:3px;text-transform:uppercase;text-align:center;margin-top:6px;}
+.pin-name{font-family:'Oswald',sans-serif;font-size:22px;font-weight:600;letter-spacing:3px;text-align:center;}
 .pin-dots{display:flex;gap:14px;}
 .dot{width:16px;height:16px;border-radius:50%;border:2px solid var(--border);background:transparent;transition:all .2s;}
 .dot.filled{background:var(--gold);border-color:var(--gold);}
@@ -193,13 +225,10 @@ body{font-family:'Source Sans 3',sans-serif;background:var(--bg);color:var(--tex
 
 /* SETTINGS */
 .settings-screen{display:flex;flex-direction:column;padding:20px 20px 100px;gap:14px;min-height:100vh;}
-.student-row{display:flex;align-items:center;gap:8px;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:11px 13px;}
-.name-field{flex:1;background:transparent;border:none;color:var(--text);font-size:15px;font-weight:600;font-family:'Source Sans 3',sans-serif;outline:none;}
-.pin-field{width:66px;background:var(--surface2);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;font-family:'Oswald',sans-serif;padding:5px 7px;text-align:center;outline:none;}
-.pin-field:focus{border-color:var(--teacher);}
-.del-btn{background:none;border:none;color:var(--dim);font-size:18px;cursor:pointer;padding:3px;}
-.add-btn{padding:11px;border-radius:var(--radius);border:1.5px dashed var(--border);background:transparent;color:var(--muted);font-size:14px;cursor:pointer;text-align:center;font-family:'Source Sans 3',sans-serif;}
-.save-badge{text-align:center;font-size:12px;color:var(--green);min-height:18px;}
+.student-row-ro{display:flex;align-items:center;gap:8px;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:11px 13px;}
+.ro-name{flex:1;font-size:15px;font-weight:600;color:var(--text);}
+.ro-pin{width:66px;background:var(--surface2);border:1.5px solid var(--border);border-radius:8px;color:var(--muted);font-size:14px;font-family:'Oswald',sans-serif;padding:5px 7px;text-align:center;}
+.ro-inst{font-size:12px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;min-width:48px;text-align:right;}
 
 /* LOOKUP */
 .lookup-screen{display:flex;flex-direction:column;padding:20px 20px 90px;gap:16px;min-height:100vh;}
@@ -254,6 +283,18 @@ body{font-family:'Source Sans 3',sans-serif;background:var(--bg);color:var(--tex
 .feedback{text-align:center;font-size:16px;font-weight:700;min-height:22px;}
 .feedback.ok{color:var(--green);}
 .feedback.no{color:var(--dim);}
+
+/* MULTI-SELECT */
+.multi-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;}
+.multi-btn{padding:14px 2px;border-radius:10px;border:1.5px solid var(--border);background:var(--surface);color:var(--text);font-family:'Oswald',sans-serif;font-size:18px;font-weight:700;cursor:pointer;text-align:center;transition:all .15s;}
+.multi-btn:active{transform:scale(.93);}
+.multi-btn.multi-selected{border-color:var(--gold);background:rgba(240,192,64,.18);color:var(--gold);}
+.multi-btn.multi-right{border-color:var(--green);background:rgba(129,199,132,.18);color:var(--green);}
+.multi-btn.multi-wrong{border-color:var(--dim);background:rgba(239,83,80,.18);color:var(--dim);}
+.multi-btn.multi-missed{border-color:var(--green);background:rgba(129,199,132,.07);color:var(--green);opacity:.6;}
+.multi-btn.multi-disabled{opacity:.3;cursor:default;}
+.multi-btn:disabled{cursor:default;}
+.multi-hint{font-size:12px;color:var(--muted);text-align:center;line-height:1.5;}
 
 /* VISUAL REINFORCEMENT PANEL */
 .reinforce{background:var(--surface2);border:1.5px solid var(--border);border-radius:var(--radius);padding:14px;display:flex;flex-direction:column;gap:10px;}
@@ -407,7 +448,7 @@ return (
 );
 }
 
-if (step.type==="which") {
+if (step.type==="whichSelect") {
 return (
 <div className="reinforce">
 <div className="reinforce-title">
@@ -424,6 +465,28 @@ return (
 )}
 <div className="mini-circle-wrap">
 <CircleSVG activeKey={keyData.name} teacherMode={false} mini={true}/>
+</div>
+</div>
+);
+}
+
+if (step.type==="majorSelect") {
+return (
+<div className="reinforce">
+<div className="reinforce-title">Major chords in every major key: 1, 4, 5</div>
+<div className="chord-reinforce-grid">
+{keyData.chords.map(c=>{
+let wCls="";
+if (c.num===1) wCls="w1"; else if (c.num===4) wCls="w4"; else if (c.num===5) wCls="w5";
+const isHl=[1,4,5].includes(c.num);
+return (
+<div key={c.num} className={`cri-row ${wCls} ${isHl?"hl":""}`}>
+<div className={`cri-num ${c.quality}`}>{c.num}</div>
+<div className="cri-name">{c.name}</div>
+<div className="cri-q">{c.quality==="dim"?"dim":c.quality==="minor"?"minor":"Major"}</div>
+</div>
+);
+})}
 </div>
 </div>
 );
@@ -457,30 +520,31 @@ return (
 // APP
 // ============================================================
 export default function App() {
-const [screen, setScreen]         = useState("pin");
-const [pin, setPin]               = useState("");
-const [pinError, setPinError]     = useState(false);
-const [isTeacher, setIsTeacher]   = useState(false);
-const [studentName, setStudentName] = useState("");
+const [screen, setScreen]             = useState("nameSelect");
+const [selectedLoginName, setSelectedLoginName] = useState("");
+const [pin, setPin]                   = useState("");
+const [pinError, setPinError]         = useState(false);
+const [isTeacher, setIsTeacher]       = useState(false);
+const [studentName, setStudentName]   = useState("");
+const [studentInstrument, setStudentInstrument] = useState("");
 const [learningStyle, setLearningStyle] = useState(null);
-const [quizAnswers, setQuizAnswers] = useState([]);
-const [quizQ, setQuizQ]           = useState(0);
-const [lockedKey, setLockedKey]   = useState(null);
-const [students, setStudents]     = useState(getStudents);
-const [saveBadge, setSaveBadge]   = useState("");
-const [lookupKey, setLookupKey]   = useState(null);
-const [currentKey, setCurrentKey] = useState(null);
-const [steps, setSteps]           = useState([]);
-const [stepIdx, setStepIdx]       = useState(0);
-const [selectedAns, setSelectedAns] = useState(null);
-const [answered, setAnswered]     = useState(false);
-const [stepResults, setStepResults] = useState([]);
-const [activeTab, setActiveTab]   = useState("circle");
+const [quizAnswers, setQuizAnswers]   = useState([]);
+const [quizQ, setQuizQ]               = useState(0);
+const [lockedKey, setLockedKey]       = useState(null);
+const [lookupKey, setLookupKey]       = useState(null);
+const [currentKey, setCurrentKey]     = useState(null);
+const [steps, setSteps]               = useState([]);
+const [stepIdx, setStepIdx]           = useState(0);
+const [selectedAns, setSelectedAns]   = useState(null);
+const [answered, setAnswered]         = useState(false);
+const [stepResults, setStepResults]   = useState([]);
+const [multiSelected, setMultiSelected] = useState([]);
+const [activeTab, setActiveTab]       = useState("circle");
 
 const timer = useRef(null);
 const resetTimer = useCallback(() => {
 if (timer.current) clearTimeout(timer.current);
-if (screen!=="pin"&&screen!=="timeout")
+if (screen!=="nameSelect"&&screen!=="timeout")
 timer.current = setTimeout(()=>setScreen("timeout"), 15*60*1000);
 }, [screen]);
 useEffect(() => {
@@ -490,19 +554,32 @@ resetTimer();
 return ()=>{evts.forEach(e=>window.removeEventListener(e,resetTimer));if(timer.current)clearTimeout(timer.current);};
 }, [resetTimer]);
 
-// PIN
+// Login: name selected, now show PIN entry
+const handleNameSelect = (name) => {
+setSelectedLoginName(name);
+setPin("");
+setPinError(false);
+setScreen("pin");
+};
+
+// PIN entry — works for both students and teacher
 const handlePin = (d) => {
 const next=pin+d; if (next.length>4) return;
 setPin(next); setPinError(false);
 if (next.length===4) {
 setTimeout(()=>{
-if (next===TEACHER_PIN) { setPin(""); setIsTeacher(true); setScreen("teacherHome"); }
-else {
-const found=students.find(s=>s.pin===next);
-if (found) {
-setPin(""); setIsTeacher(false); setStudentName(found.name);
-logActivity(found.name,{type:"login"});
-const saved=localStorage.getItem(`style_${found.name}`);
+if (selectedLoginName==="__teacher__") {
+if (next===TEACHER_PIN) {
+setPin(""); setIsTeacher(true); setScreen("teacherHome");
+} else { setPinError(true); setTimeout(()=>{setPin("");setPinError(false);},700); }
+} else {
+const student = STUDENTS[selectedLoginName];
+if (student && next===student.pin) {
+setPin(""); setIsTeacher(false);
+setStudentName(selectedLoginName);
+setStudentInstrument(student.instrument);
+logActivity(selectedLoginName,{type:"login"});
+const saved=localStorage.getItem(`style_${selectedLoginName}`);
 if (saved){setLearningStyle(saved);setScreen("home");}
 else setScreen("stylePick");
 } else { setPinError(true); setTimeout(()=>{setPin("");setPinError(false);},700); }
@@ -530,7 +607,7 @@ logActivity(studentName,{type:"quiz_complete",style:winner}); setScreen("home");
 const startRound = (keyOverride) => {
 const key=keyOverride||(lockedKey?lockedKey:null)||pickWeightedKey(currentKey?.name);
 setCurrentKey(key); setSteps(buildKeyRound(key));
-setStepIdx(0); setSelectedAns(null); setAnswered(false); setStepResults([]);
+setStepIdx(0); setSelectedAns(null); setAnswered(false); setStepResults([]); setMultiSelected([]);
 setScreen("game"); logActivity(studentName||"teacher",{type:"round_start",key:key.name});
 };
 
@@ -540,22 +617,37 @@ setSelectedAns(opt); setAnswered(true);
 setStepResults(r=>[...r, opt===steps[stepIdx].correct]);
 };
 
+const toggleMulti = (opt) => {
+setMultiSelected(prev => prev.includes(opt) ? prev.filter(x=>x!==opt) : [...prev, opt]);
+};
+
+const handleMultiSubmit = () => {
+if (answered) return;
+const sorted = multiSelected.slice().sort();
+const correctSorted = (steps[stepIdx].correct||[]).slice().sort();
+const isCorrect = arraysEqual(sorted, correctSorted);
+setAnswered(true);
+setStepResults(r=>[...r, isCorrect]);
+};
+
 const handleNext = () => {
 const next=stepIdx+1;
 if (next>=steps.length){
 logActivity(studentName||"teacher",{type:"round_complete",key:currentKey.name,correct:stepResults.filter(Boolean).length,total:steps.length});
 setScreen("results");
-} else { setStepIdx(next); setSelectedAns(null); setAnswered(false); }
+} else { setStepIdx(next); setSelectedAns(null); setAnswered(false); setMultiSelected([]); }
 };
 
-const updateStudent=(idx,field,val)=>setStudents(s=>s.map((x,i)=>i===idx?{...x,[field]:val}:x));
-const saveStudentsFn=()=>{ saveStudents(students); setSaveBadge("Saved ✓"); setTimeout(()=>setSaveBadge(""),2000); };
-
 const step=steps[stepIdx];
+const isMultiSelect = step?.type==="whichSelect"||step?.type==="majorSelect";
 const circleIdx=currentKey?CIRCLE_ORDER.indexOf(currentKey.name):-1;
 const fourKey=circleIdx>=0?CIRCLE_ORDER[(circleIdx-1+15)%15]:null;
 const fiveKey=circleIdx>=0?CIRCLE_ORDER[(circleIdx+1)%15]:null;
-const isRight=answered&&selectedAns===step?.correct;
+const isRight = answered && (
+  isMultiSelect
+    ? arraysEqual(multiSelected.slice().sort(), (step?.correct||[]).slice().sort())
+    : selectedAns===step?.correct
+);
 const styleLabel={visual:"👁 Visual",kinesthetic:"🤸 Hands-On",auditory:"👂 Listening"};
 
 const goHome=()=>setScreen(isTeacher?"teacherHome":"home");
@@ -587,12 +679,39 @@ const TeacherNav = ({active}) => (
 );
 
 // ============================================================
-if (screen==="timeout") return <><style>{S}</style><div className="timeout-screen"/></>;
+if (screen==="timeout") return <><style>{S}</style><div className="timeout-screen" onClick={()=>setScreen("nameSelect")}/></>;
+
+// NAME SELECT
+if (screen==="nameSelect") return (
+<><style>{S}</style>
+<div className="name-screen">
+<div><div className="pin-logo">♩♪♫♬</div><div className="pin-sub">Circle of Fifths</div></div>
+<div className="name-list">
+{Object.keys(STUDENTS).map(name => (
+<button key={name} className="name-btn" onClick={()=>handleNameSelect(name)}>{name}</button>
+))}
+</div>
+<div className="name-divider">
+<div className="name-divider-line"/>
+<div className="name-divider-text">or</div>
+<div className="name-divider-line"/>
+</div>
+<div style={{width:"100%",maxWidth:320}}>
+<button className="teacher-btn" onClick={()=>handleNameSelect("__teacher__")}>🎓 Teacher Login</button>
+</div>
+</div></>
+);
 
 if (screen==="pin") return (
 <><style>{S}</style>
 <div className="pin-screen">
-<div><div className="pin-logo">♩♪♫♬</div><div className="pin-sub">Circle of Fifths</div></div>
+<div>
+<div className="pin-logo">♩♪♫♬</div>
+<div className="pin-sub">Circle of Fifths</div>
+</div>
+<div className={`pin-name ${selectedLoginName==="__teacher__"?"":"" }`} style={{color:selectedLoginName==="__teacher__"?"var(--teacher)":"var(--gold)"}}>
+{selectedLoginName==="__teacher__"?"Teacher":selectedLoginName}
+</div>
 <div className="pin-dots">{Array.from({length:4}).map((_,i)=><div key={i} className={`dot ${i<pin.length?(pinError?"error":"filled"):""}`}/>)}</div>
 <div className="pin-pad">
 {[1,2,3,4,5,6,7,8,9].map(d=><button key={d} className="pin-btn" onClick={()=>handlePin(String(d))}>{d}</button>)}
@@ -600,6 +719,7 @@ if (screen==="pin") return (
 <button className="pin-btn" style={{fontSize:18,color:"var(--muted)"}} onClick={()=>setPin(p=>p.slice(0,-1))}>⌫</button>
 </div>
 <div className="pin-error">{pinError?"Incorrect PIN — try again":""}</div>
+<button className="ghost-btn" style={{maxWidth:320}} onClick={()=>{setPin("");setPinError(false);setScreen("nameSelect");}}>← Back</button>
 </div></>
 );
 
@@ -639,7 +759,7 @@ if (screen==="teacherHome") return (
 <div className="top-bar">
 <div className="top-name" style={{color:"var(--teacher)"}}>Teacher</div>
 <div className="top-logo">C5</div>
-<button className="ghost-btn" style={{width:"auto",padding:"4px 12px",fontSize:12}} onClick={()=>{setIsTeacher(false);setLockedKey(null);setScreen("pin");}}>Exit</button>
+<button className="ghost-btn" style={{width:"auto",padding:"4px 12px",fontSize:12}} onClick={()=>{setIsTeacher(false);setLockedKey(null);setScreen("nameSelect");}}>Exit</button>
 </div>
 <div className="teacher-badge">🎓 Teacher Mode</div>
 {lockedKey ? (
@@ -663,7 +783,7 @@ Tap a key on the circle to lock it for students.<br/>
 <div className="leg"><div className="leg-dot" style={{background:"rgba(192,132,252,.6)"}}/> Locked</div>
 </div>
 <button className="primary-btn" onClick={()=>startRound()}>🎮 Preview This Key</button>
-<button className="teacher-btn" onClick={()=>setScreen("settings")}>⚙️ Manage Students & PINs</button>
+<button className="teacher-btn" onClick={()=>setScreen("settings")}>⚙️ View Students</button>
 </div>
 <TeacherNav active="circle"/>
 </div></>
@@ -675,19 +795,19 @@ if (screen==="settings") return (
 <div className="settings-screen">
 <div style={{display:"flex",alignItems:"center",gap:12}}>
 <button className="ghost-btn" style={{width:"auto",padding:"6px 14px"}} onClick={()=>setScreen("teacherHome")}>← Back</button>
-<div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,color:"var(--teacher)",letterSpacing:2}}>Students & PINs</div>
+<div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,color:"var(--teacher)",letterSpacing:2}}>Students</div>
 </div>
-<div className="sec-lbl">Name + 4-digit PIN per student</div>
-{students.map((s,i)=>(
-<div key={i} className="student-row">
-<input className="name-field" placeholder="Student name" value={s.name} onChange={e=>updateStudent(i,"name",e.target.value)}/>
-<input className="pin-field" placeholder="PIN" maxLength={4} value={s.pin} onChange={e=>updateStudent(i,"pin",e.target.value.replace(/\D/g,""))}/>
-<button className="del-btn" onClick={()=>setStudents(s=>s.filter((_,j)=>j!==i))}>✕</button>
+<div className="sec-lbl">Hardcoded in the app — edit App.jsx to change</div>
+{Object.entries(STUDENTS).map(([name, info]) => (
+<div key={name} className="student-row-ro">
+<div className="ro-name">{name}</div>
+<div className="ro-pin">{"•".repeat(4)}</div>
+<div className="ro-inst">{info.instrument}</div>
 </div>
 ))}
-<button className="add-btn" onClick={()=>setStudents(s=>[...s,{name:"",pin:""}])}>+ Add Student</button>
-<button className="teacher-btn" onClick={saveStudentsFn}>Save Changes</button>
-<div className="save-badge">{saveBadge}</div>
+<div style={{marginTop:8,fontSize:13,color:"var(--muted)",lineHeight:1.6}}>
+To add, remove, or change a student, update the <code style={{background:"var(--surface2)",padding:"2px 6px",borderRadius:4,fontSize:12}}>STUDENTS</code> object at the top of <code style={{background:"var(--surface2)",padding:"2px 6px",borderRadius:4,fontSize:12}}>src/App.jsx</code>.
+</div>
 <div className="sec-lbl" style={{marginTop:8}}>Teacher PIN</div>
 <div style={{fontSize:13,color:"var(--muted)"}}>Set at the top of the code file — look for <code style={{background:"var(--surface2)",padding:"2px 6px",borderRadius:4,fontSize:12}}>TEACHER_PIN</code></div>
 </div>
@@ -746,7 +866,8 @@ return (
 
 // GAME
 if (screen==="game"&&step) {
-const phase=stepIdx<3?"nav":"chord";
+// Steps: 0=side, 1=count, 2=whichSelect, 3=majorSelect, 4-10=chord (7 chords)
+const phase = stepIdx<3?"nav":stepIdx===3?"theory":"chord";
 const total=steps.length;
 return (
 <><style>{S}</style>
@@ -765,29 +886,68 @@ return (
         {steps.map((_,i)=>{let c="sp";if(i<stepIdx)c+=stepResults[i]?" ok":" no";else if(i===stepIdx)c+=" cur";return <div key={i} className={c}/>;}) }
       </div>
 
-      <div className="sec-lbl">{phase==="nav"?`Step ${stepIdx+1} of 3 — Key Signature`:`Chord ${stepIdx-2} of 7 — ${currentKey.name} Major`}</div>
+      <div className="sec-lbl">
+        {phase==="nav"?`Step ${stepIdx+1} of 3 — Key Signature`:
+         phase==="theory"?"Chord Theory — All Keys":
+         `Chord ${stepIdx-3} of 7 — ${currentKey.name} Major`}
+      </div>
 
       <div className="q-card">
-        <div className="q-lbl">{phase==="nav"?"Key Navigation":"Chord Quality"}</div>
+        <div className="q-lbl">{phase==="nav"?"Key Navigation":phase==="theory"?"Chord Theory":"Chord Quality"}</div>
         <div className="q-text">{step.question}</div>
       </div>
 
-      <div className="ans-list">
-        {step.options.map(opt=>{
-          let cls="ans";
-          if(answered){if(opt===step.correct)cls+=" reveal";else if(opt===selectedAns)cls+=" wrong";}
-          return <button key={opt} className={cls} onClick={()=>handleAnswer(opt)} disabled={answered}>{opt}</button>;
-        })}
-      </div>
+      {isMultiSelect ? (
+        <>
+          <div className="multi-grid">
+            {step.options.map(opt => {
+              const isSelected = multiSelected.includes(opt);
+              const inCorrect = (step.correct||[]).includes(opt);
+              let cls = "multi-btn";
+              if (step.isNone) {
+                cls += " multi-disabled";
+              } else if (answered) {
+                if (inCorrect && isSelected) cls += " multi-right";
+                else if (!inCorrect && isSelected) cls += " multi-wrong";
+                else if (inCorrect && !isSelected) cls += " multi-missed";
+              } else if (isSelected) {
+                cls += " multi-selected";
+              }
+              return (
+                <button key={opt} className={cls}
+                  onClick={() => !answered && !step.isNone && toggleMulti(opt)}
+                  disabled={answered || step.isNone}>
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
+          {!answered && (
+            <button className="primary-btn" onClick={handleMultiSubmit}>Check Answer</button>
+          )}
+        </>
+      ) : (
+        <div className="ans-list">
+          {step.options.map(opt=>{
+            let cls="ans";
+            if(answered){if(opt===step.correct)cls+=" reveal";else if(opt===selectedAns)cls+=" wrong";}
+            return <button key={opt} className={cls} onClick={()=>handleAnswer(opt)} disabled={answered}>{opt}</button>;
+          })}
+        </div>
+      )}
 
       <div className={`feedback ${answered?(isRight?"ok":"no"):""}`}>
-        {answered?(isRight?"✓ Correct!":"✗  "+step.correct):""}
+        {answered ? (
+          isRight ? "✓ Correct!" : (
+            isMultiSelect
+              ? `✗  Correct: ${(step.correct||[]).length===0?"None":(step.correct||[]).join(", ")}`
+              : `✗  ${step.correct}`
+          )
+        ) : ""}
       </div>
 
-      {/* VISUAL REINFORCEMENT — always shown after answer */}
       {answered && <Reinforce step={step} keyData={currentKey} isCorrect={isRight}/>}
 
-      {/* Circle 4/5 shortcut — after step 3 */}
       {answered&&phase==="nav"&&stepIdx===2&&(
         <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:12,padding:"12px 14px",background:"var(--surface)",borderRadius:"var(--radius)",border:"1.5px solid var(--border)"}}>
           <div style={{textAlign:"center"}}>
@@ -837,4 +997,3 @@ return (
 </div></>
 );
 }
-
