@@ -1,6 +1,38 @@
 # Music Practice App — Change Log
 
 ---
+## 2026-06-03 — Phase 4: Chord Diagram Trainer (Julia)
+
+### What Was Changed
+- `src/App.jsx` — added chord library data, SVG diagram component, quiz screens, CSS, state, and handlers
+
+### What Was Added
+- `GUITAR_CHORDS` constant: 25 chords (19 open, 6 barre) with `frets`, `fingers`, and `barre` fields. Strings indexed 0–5 = low E to high e; muted strings = -1, open = 0
+- `ChordDiagram` SVG component: renders a 6-string × 5-fret fretboard. Draws: string name labels (E A D G B e), O/X markers above nut for open/muted strings, thick nut rect at fret 1 (thin line for higher positions), fret number label for baseFret > 1, barre as a rounded rect spanning barred strings with "1" centered inside it, individual circles with finger numbers for non-barre fingers. baseFret auto-computed as min of active frets
+- 9 new state variables: `cdQueue`, `cdIdx`, `cdTapped`, `cdPhase`, `cdFeedback`, `cdCorrect`, `cdWrong`, `cdNotYet`, `cdSkipped`
+- `startChordQuiz()`: shuffles GUITAR_CHORDS, resets all cd state, navigates to chordQuiz
+- `handleCdTap(str, fret)`: toggles "str-fret" key in cdTapped array
+- `handleCdCheck()`: compares sorted tapped positions against expected (fret > 0 strings), marks correct/wrong, sets cdPhase="revealed"
+- `handleCdShowMe()`: marks chord as "not yet learned", sets cdPhase="revealed" without scoring
+- `handleCdSkip()`: adds chord to cdSkipped, advances without revealing
+- `handleCdNext()`: advances to next chord or navigates to cdResults
+- `chordQuiz` screen: chord name header, step progress bar, 6×7 tappable grid (fret labels left, string names top), three-button row (Check Answer / Show Me / Skip); after reveal shows feedback + ChordDiagram + Next button
+- `cdResults` screen: summary counts (correct/incorrect/not yet/skipped), chip lists per category, Play Again / Back to Home
+- CSS: `.cd-screen`, `.cd-grid`, `.cd-cell` + state variants (tapped/hit/miss/need), `.cd-section`, `.cd-chip` variants (ok/no/notyet/skip), `.cd-diagram-wrap`, `.cd-btn-row`, `.cd-results`
+- "🎸 Chord Diagrams" button on student home (visible only when `studentInstrument === "guitar"`)
+- "🎸 Chord Diagrams" button on teacher home (always visible)
+
+### Known Issues or Limitations
+- The quiz grid always shows frets 1–7 (absolute). For barre chords like G#m (frets 4–6) or B/Bm/F#m (frets 2–4), the student must know the absolute fret positions. This is intentional and tests real knowledge.
+- The tappable grid does not show open strings — only fretted positions are tapped. Open strings are shown in the reference diagram after answering.
+
+### Manual Steps Required
+- None (committed and pushed)
+
+### Next Phase
+- Phase 5: Bass fretboard quiz for Bernardo (open strings + first 7 frets, 4 strings)
+
+---
 ## 2026-06-03 — Phase 3 Fix: Teacher Mode Visibility
 
 ### What Was Changed

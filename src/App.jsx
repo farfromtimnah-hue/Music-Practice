@@ -169,6 +169,37 @@ function buildPortugueseRound(mode) {
   });
 }
 
+// ============================================================
+// GUITAR CHORD LIBRARY (Julia)
+// ============================================================
+const GUITAR_CHORDS = [
+  { name:"E",        frets:[ 0, 2, 2, 1, 0, 0], fingers:[0,2,3,1,0,0], barre:false },
+  { name:"Em",       frets:[ 0, 2, 2, 0, 0, 0], fingers:[0,2,3,0,0,0], barre:false },
+  { name:"E7",       frets:[ 0, 2, 0, 1, 0, 0], fingers:[0,2,0,1,0,0], barre:false },
+  { name:"A",        frets:[-1, 0, 2, 2, 2, 0], fingers:[0,0,1,2,3,0], barre:false },
+  { name:"Am",       frets:[-1, 0, 2, 2, 1, 0], fingers:[0,0,2,3,1,0], barre:false },
+  { name:"A7",       frets:[-1, 0, 2, 0, 2, 0], fingers:[0,0,2,0,3,0], barre:false },
+  { name:"D",        frets:[-1,-1, 0, 2, 3, 2], fingers:[0,0,0,1,3,2], barre:false },
+  { name:"Dm",       frets:[-1,-1, 0, 2, 3, 1], fingers:[0,0,0,2,3,1], barre:false },
+  { name:"D7",       frets:[-1,-1, 0, 2, 1, 2], fingers:[0,0,0,2,1,3], barre:false },
+  { name:"G",        frets:[ 3, 2, 0, 0, 0, 3], fingers:[2,1,0,0,0,3], barre:false },
+  { name:"G7",       frets:[ 3, 2, 0, 0, 0, 1], fingers:[3,2,0,0,0,1], barre:false },
+  { name:"C",        frets:[-1, 3, 2, 0, 1, 0], fingers:[0,3,2,0,1,0], barre:false },
+  { name:"Cmaj7",    frets:[-1, 3, 2, 0, 0, 0], fingers:[0,3,2,0,0,0], barre:false },
+  { name:"Dsus2",    frets:[-1,-1, 0, 2, 3, 0], fingers:[0,0,0,1,2,0], barre:false },
+  { name:"Dsus4",    frets:[-1,-1, 0, 2, 3, 3], fingers:[0,0,0,1,2,3], barre:false },
+  { name:"Asus2",    frets:[-1, 0, 2, 2, 0, 0], fingers:[0,0,1,2,0,0], barre:false },
+  { name:"Asus4",    frets:[-1, 0, 2, 2, 3, 0], fingers:[0,0,1,2,3,0], barre:false },
+  { name:"Cadd9",    frets:[-1, 3, 2, 0, 3, 0], fingers:[0,3,2,0,4,0], barre:false },
+  { name:"G/B",      frets:[-1, 2, 0, 0, 0, 3], fingers:[0,1,0,0,0,3], barre:false },
+  { name:"F",        frets:[ 1, 1, 2, 3, 3, 1], fingers:[1,1,2,3,4,1], barre:true  },
+  { name:"F (easy)", frets:[-1,-1, 3, 2, 1, 1], fingers:[0,0,3,2,1,1], barre:true  },
+  { name:"B",        frets:[-1, 2, 4, 4, 4, 2], fingers:[0,1,2,3,4,1], barre:true  },
+  { name:"Bm",       frets:[-1, 2, 4, 4, 3, 2], fingers:[0,1,3,4,2,1], barre:true  },
+  { name:"F#m",      frets:[ 2, 2, 4, 4, 4, 2], fingers:[1,1,2,3,4,1], barre:true  },
+  { name:"G#m",      frets:[ 4, 4, 6, 6, 6, 4], fingers:[1,1,2,3,4,1], barre:true  },
+];
+
 function logActivity(name, activity) {
 try {
 const existing = JSON.parse(localStorage.getItem("c5Log")||"[]");
@@ -369,7 +400,35 @@ body{font-family:'Source Sans 3',sans-serif;background:var(--bg);color:var(--tex
 
 .timeout-screen{position:fixed;inset:0;background:#000;z-index:9999;}
 input{color:var(--text);}
+
+/* CHORD DIAGRAM TRAINER */
+.cd-screen{display:flex;flex-direction:column;padding:18px 18px 32px;gap:12px;min-height:100vh;}
+.cd-chord-name{font-family:'Oswald',sans-serif;font-size:36px;font-weight:700;color:var(--gold);text-align:center;letter-spacing:2px;}
+.cd-sub{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);text-align:center;}
+.cd-grid{display:grid;grid-template-columns:22px repeat(6,1fr);gap:4px;}
+.cd-hdr{font-family:'Oswald',sans-serif;font-size:13px;font-weight:600;color:var(--muted);text-align:center;display:flex;align-items:center;justify-content:center;height:26px;}
+.cd-fret-lbl{font-family:'Oswald',sans-serif;font-size:11px;color:var(--border);display:flex;align-items:center;justify-content:center;height:40px;}
+.cd-cell{height:40px;border-radius:8px;border:1.5px solid var(--border);background:var(--surface2);cursor:pointer;transition:all .12s;-webkit-tap-highlight-color:transparent;}
+.cd-cell:active{transform:scale(.9);}
+.cd-cell.tapped{border-color:var(--gold);background:rgba(240,192,64,.22);}
+.cd-cell.hit{border-color:var(--green);background:rgba(129,199,132,.22);cursor:default;}
+.cd-cell.miss{border-color:var(--dim);background:rgba(239,83,80,.22);cursor:default;}
+.cd-cell.need{border-color:var(--green);background:rgba(129,199,132,.07);cursor:default;opacity:.7;}
+.cd-cell:disabled{cursor:default;transform:none;}
+.cd-diagram-wrap{display:flex;justify-content:center;padding:6px 0;}
+.cd-btn-row{display:flex;gap:8px;}
+.cd-btn-row .ghost-btn,.cd-btn-row .primary-btn{flex:1;padding:12px 6px;font-size:13px;}
+.cd-results{display:flex;flex-direction:column;padding:24px 20px 40px;gap:14px;min-height:100vh;}
+.cd-section{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:14px;display:flex;flex-direction:column;gap:10px;}
+.cd-section-lbl{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);}
+.cd-chips{display:flex;flex-wrap:wrap;gap:6px;}
+.cd-chip{padding:5px 12px;border-radius:20px;font-family:'Oswald',sans-serif;font-size:14px;font-weight:700;}
+.cd-chip.ok{background:rgba(129,199,132,.15);color:var(--green);border:1.5px solid rgba(129,199,132,.4);}
+.cd-chip.no{background:rgba(239,83,80,.15);color:var(--dim);border:1.5px solid rgba(239,83,80,.4);}
+.cd-chip.notyet{background:rgba(240,192,64,.12);color:var(--gold);border:1.5px solid rgba(240,192,64,.3);}
+.cd-chip.skip{background:var(--surface2);color:var(--muted);border:1.5px solid var(--border);}
 `;
+
 
 // ============================================================
 // 15-KEY CIRCLE SVG
@@ -550,6 +609,74 @@ return (
 }
 
 // ============================================================
+// CHORD DIAGRAM SVG
+// ============================================================
+function ChordDiagram({ chord }) {
+const SX=[30,54,78,102,126,150]; // string x: low E to high e
+const NUT_Y=38, FRET_H=28, R=11;
+const used=chord.frets.filter(f=>f>0);
+const baseFret=used.length>0?Math.min(...used):1;
+const dotY=f=>NUT_Y+(f-baseFret)*FRET_H+FRET_H/2;
+// Barre
+const barreFret=chord.barre?(chord.frets.find((f,s)=>chord.fingers[s]===1&&f>0)??null):null;
+const barreStr=chord.barre&&barreFret!==null
+?chord.frets.reduce((a,f,s)=>{if(chord.fingers[s]===1&&f===barreFret)a.push(s);return a;},[])
+:[];
+const bx1=barreStr.length>=2?SX[barreStr[0]]:0;
+const bx2=barreStr.length>=2?SX[barreStr[barreStr.length-1]]:0;
+const bcy=barreFret!==null?dotY(barreFret):0;
+return(
+<svg viewBox="0 0 180 195" style={{width:"100%",maxWidth:200,height:"auto"}}>
+{["E","A","D","G","B","e"].map((l,s)=>(
+<text key={s} x={SX[s]} y={13} textAnchor="middle" fontSize="11"
+fontWeight="600" fill="#8888aa" fontFamily="Oswald,sans-serif">{l}</text>
+))}
+{chord.frets.map((f,s)=>{
+if(f===0)return<text key={s} x={SX[s]} y={29} textAnchor="middle" fontSize="13"
+fontWeight="700" fill="#81c784" fontFamily="Oswald,sans-serif">O</text>;
+if(f===-1)return<text key={s} x={SX[s]} y={29} textAnchor="middle" fontSize="13"
+fontWeight="700" fill="#ef5350" fontFamily="Oswald,sans-serif">✕</text>;
+return null;
+})}
+{baseFret===1
+?<rect x={SX[0]-4} y={33} width={SX[5]-SX[0]+8} height={5} rx="2" fill="#e8e8f0"/>
+:<line x1={SX[0]-4} y1={NUT_Y} x2={SX[5]+4} y2={NUT_Y} stroke="#4a4a60" strokeWidth="1.5"/>
+}
+{baseFret>1&&<text x={SX[0]-10} y={bcy+4} textAnchor="end" fontSize="10"
+fill="#8888aa" fontFamily="Oswald,sans-serif">{baseFret}fr</text>}
+{[1,2,3,4,5].map(i=>(
+<line key={i} x1={SX[0]-4} y1={NUT_Y+i*FRET_H} x2={SX[5]+4} y2={NUT_Y+i*FRET_H}
+stroke="#2a2a40" strokeWidth="1.5"/>
+))}
+{SX.map((x,s)=>(
+<line key={s} x1={x} y1={NUT_Y} x2={x} y2={NUT_Y+5*FRET_H}
+stroke="#2a2a40" strokeWidth="1.5"/>
+))}
+{chord.barre&&barreStr.length>=2&&(
+<rect x={bx1-R} y={bcy-R} width={bx2-bx1+2*R} height={2*R} rx={R}
+fill="#e8e8f0" opacity="0.92"/>
+)}
+{chord.barre&&barreStr.length>=2&&(
+<text x={(bx1+bx2)/2} y={bcy+4} textAnchor="middle" fontSize="12"
+fontWeight="700" fill="#0a0a0f" fontFamily="Oswald,sans-serif">1</text>
+)}
+{chord.frets.map((f,s)=>{
+if(f<=0)return null;
+if(chord.barre&&chord.fingers[s]===1)return null;
+const cy=dotY(f);
+return(
+<g key={s}>
+<circle cx={SX[s]} cy={cy} r={R} fill="#e8e8f0"/>
+<text x={SX[s]} y={cy+4} textAnchor="middle" fontSize="12"
+fontWeight="700" fill="#0a0a0f" fontFamily="Oswald,sans-serif">{chord.fingers[s]}</text>
+</g>
+);
+})}
+</svg>
+);
+}
+
+// ============================================================
 // APP
 // ============================================================
 export default function App() {
@@ -579,6 +706,15 @@ const [ptIdx, setPtIdx]               = useState(0);
 const [ptAns, setPtAns]               = useState(null);
 const [ptAnswered, setPtAnswered]     = useState(false);
 const [ptResults, setPtResults]       = useState([]);
+const [cdQueue, setCdQueue]           = useState([]);
+const [cdIdx, setCdIdx]               = useState(0);
+const [cdTapped, setCdTapped]         = useState([]);
+const [cdPhase, setCdPhase]           = useState("quiz");
+const [cdFeedback, setCdFeedback]     = useState(null);
+const [cdCorrect, setCdCorrect]       = useState([]);
+const [cdWrong, setCdWrong]           = useState([]);
+const [cdNotYet, setCdNotYet]         = useState([]);
+const [cdSkipped, setCdSkipped]       = useState([]);
 
 const timer = useRef(null);
 const resetTimer = useCallback(() => {
@@ -699,6 +835,53 @@ setScreen("ptResults");
 } else { setPtIdx(next); setPtAns(null); setPtAnswered(false); }
 };
 
+const startChordQuiz = () => {
+const q=shuffle(GUITAR_CHORDS);
+setCdQueue(q); setCdIdx(0); setCdTapped([]); setCdPhase("quiz"); setCdFeedback(null);
+setCdCorrect([]); setCdWrong([]); setCdNotYet([]); setCdSkipped([]);
+setScreen("chordQuiz");
+logActivity(studentName||"teacher",{type:"chord_quiz_start"});
+};
+
+const handleCdTap = (str,fret) => {
+if(cdPhase!=="quiz")return;
+const key=`${str}-${fret}`;
+setCdTapped(prev=>prev.includes(key)?prev.filter(k=>k!==key):[...prev,key]);
+};
+
+const handleCdCheck = () => {
+if(cdPhase!=="quiz")return;
+const chord=cdQueue[cdIdx];
+const expected=chord.frets.map((f,s)=>f>0?`${s}-${f}`:null).filter(Boolean).sort();
+const tapped=[...cdTapped].sort();
+const ok=arraysEqual(expected,tapped);
+if(ok)setCdCorrect(c=>[...c,chord.name]);
+else setCdWrong(w=>[...w,chord.name]);
+setCdFeedback(ok?"correct":"wrong");
+setCdPhase("revealed");
+};
+
+const handleCdShowMe = () => {
+if(cdPhase!=="quiz")return;
+setCdNotYet(n=>[...n,cdQueue[cdIdx].name]);
+setCdFeedback("showme");
+setCdPhase("revealed");
+};
+
+const handleCdSkip = () => {
+if(cdPhase!=="quiz")return;
+setCdSkipped(s=>[...s,cdQueue[cdIdx].name]);
+const next=cdIdx+1;
+if(next>=cdQueue.length){logActivity(studentName||"teacher",{type:"chord_quiz_complete"});setScreen("cdResults");}
+else{setCdIdx(next);setCdTapped([]);setCdPhase("quiz");setCdFeedback(null);}
+};
+
+const handleCdNext = () => {
+const next=cdIdx+1;
+if(next>=cdQueue.length){logActivity(studentName||"teacher",{type:"chord_quiz_complete",correct:cdCorrect.length});setScreen("cdResults");}
+else{setCdIdx(next);setCdTapped([]);setCdPhase("quiz");setCdFeedback(null);}
+};
+
 const step=steps[stepIdx];
 const isMultiSelect = step?.type==="whichSelect"||step?.type==="majorSelect";
 const circleIdx=currentKey?CIRCLE_ORDER.indexOf(currentKey.name):-1;
@@ -715,6 +898,11 @@ const goHome=()=>setScreen(isTeacher?"teacherHome":"home");
 
 const ptStep = ptSteps[ptIdx];
 const ptIsRight = ptAnswered && ptAns===ptStep?.correct;
+
+const cdChord = cdQueue[cdIdx];
+const cdExpected = cdChord
+? cdChord.frets.map((f,s)=>f>0?`${s}-${f}`:null).filter(Boolean)
+: [];
 
 // NAV BARS
 const StudentNav = ({active}) => (
@@ -849,6 +1037,7 @@ Tap a key on the circle to lock it for students.<br/>
 <button className="primary-btn" onClick={()=>startRound()}>🎮 Preview This Key</button>
 <button className="ghost-btn" onClick={()=>{setActiveTab("lookup");setScreen("lookup");}}>🔍 Look Up a Key</button>
 <button className="ghost-btn" onClick={()=>setScreen("ptModeSelect")}>🇧🇷 Notas em Português</button>
+<button className="ghost-btn" onClick={startChordQuiz}>🎸 Chord Diagrams</button>
 <button className="teacher-btn" onClick={()=>setScreen("settings")}>⚙️ View Students</button>
 </div>
 <TeacherNav active="circle"/>
@@ -1110,6 +1299,105 @@ return (
 );
 }
 
+// CHORD QUIZ
+if (screen==="chordQuiz"&&cdChord) return (
+<><style>{S}</style>
+<div className="shell">
+<div className="cd-screen">
+<div className="g-header">
+<button style={{background:"none",border:"none",color:"var(--muted)",fontSize:14,cursor:"pointer",fontFamily:"'Source Sans 3',sans-serif"}} onClick={goHome}>← Exit</button>
+<div style={{fontSize:11,color:"var(--muted)",letterSpacing:2,textTransform:"uppercase"}}>{cdIdx+1} / {cdQueue.length}</div>
+</div>
+<div className="step-prog">
+{cdQueue.map((_,i)=>{
+let c="sp";
+if(i<cdIdx)c+=cdCorrect.includes(cdQueue[i].name)?" ok":(cdNotYet.includes(cdQueue[i].name)||cdSkipped.includes(cdQueue[i].name))?" cur":" no";
+else if(i===cdIdx)c+=" cur";
+return <div key={i} className={c}/>;
+})}
+</div>
+<div className="cd-chord-name">{cdChord.name}</div>
+{cdPhase==="quiz"&&(
+<div className="cd-sub">Tap where your fingers go</div>
+)}
+{cdPhase==="quiz"?(
+<>
+<div className="cd-grid">
+<div className="cd-hdr"/>
+{["E","A","D","G","B","e"].map(l=><div key={l} className="cd-hdr">{l}</div>)}
+{[1,2,3,4,5,6,7].flatMap(fret=>[
+<div key={`fr${fret}`} className="cd-fret-lbl">{fret}</div>,
+...[0,1,2,3,4,5].map(str=>{
+const key=`${str}-${fret}`;
+const tapped=cdTapped.includes(key);
+return(
+<button key={key} className={`cd-cell${tapped?" tapped":""}`}
+onClick={()=>handleCdTap(str,fret)}/>
+);
+})
+])}
+</div>
+<div className="cd-btn-row">
+<button className="primary-btn" onClick={handleCdCheck}>Check Answer</button>
+<button className="ghost-btn" onClick={handleCdShowMe}>Show Me</button>
+<button className="ghost-btn" onClick={handleCdSkip}>Skip</button>
+</div>
+</>
+):(
+<>
+<div className={`feedback ${cdFeedback==="correct"?"ok":"no"}`} style={{fontSize:18}}>
+{cdFeedback==="correct"?"✓ Nailed it!":cdFeedback==="showme"?"Here it is — practice this one:":"✗ Not quite — here's the chord:"}
+</div>
+<div className="cd-diagram-wrap"><ChordDiagram chord={cdChord}/></div>
+<button className="primary-btn" onClick={handleCdNext}>{cdIdx+1>=cdQueue.length?"See Results →":"Next →"}</button>
+</>
+)}
+</div>
+</div></>
+);
+
+// CHORD RESULTS
+if (screen==="cdResults") return (
+<><style>{S}</style>
+<div className="shell">
+<div className="cd-results">
+<div className="screen-title" style={{textAlign:"left"}}>Chord Diagrams</div>
+<div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+<div style={{fontSize:13,color:"var(--green)"}}><strong style={{fontFamily:"'Oswald',sans-serif",fontSize:22}}>{cdCorrect.length}</strong> correct</div>
+<div style={{fontSize:13,color:"var(--dim)"}}><strong style={{fontFamily:"'Oswald',sans-serif",fontSize:22}}>{cdWrong.length}</strong> incorrect</div>
+<div style={{fontSize:13,color:"var(--gold)"}}><strong style={{fontFamily:"'Oswald',sans-serif",fontSize:22}}>{cdNotYet.length}</strong> not yet learned</div>
+<div style={{fontSize:13,color:"var(--muted)"}}><strong style={{fontFamily:"'Oswald',sans-serif",fontSize:22}}>{cdSkipped.length}</strong> skipped</div>
+</div>
+{cdCorrect.length>0&&(
+<div className="cd-section">
+<div className="cd-section-lbl">✓ Correct</div>
+<div className="cd-chips">{cdCorrect.map(n=><span key={n} className="cd-chip ok">{n}</span>)}</div>
+</div>
+)}
+{cdWrong.length>0&&(
+<div className="cd-section">
+<div className="cd-section-lbl">✗ Incorrect</div>
+<div className="cd-chips">{cdWrong.map(n=><span key={n} className="cd-chip no">{n}</span>)}</div>
+</div>
+)}
+{cdNotYet.length>0&&(
+<div className="cd-section">
+<div className="cd-section-lbl">Not yet learned — keep practicing</div>
+<div className="cd-chips">{cdNotYet.map(n=><span key={n} className="cd-chip notyet">{n}</span>)}</div>
+</div>
+)}
+{cdSkipped.length>0&&(
+<div className="cd-section">
+<div className="cd-section-lbl">Skipped</div>
+<div className="cd-chips">{cdSkipped.map(n=><span key={n} className="cd-chip skip">{n}</span>)}</div>
+</div>
+)}
+<button className="primary-btn" onClick={startChordQuiz}>Play Again</button>
+<button className="ghost-btn" onClick={goHome}>Back to Home</button>
+</div>
+</div></>
+);
+
 // STUDENT HOME
 return (
 <><style>{S}</style>
@@ -1130,6 +1418,7 @@ return (
 <button className="primary-btn" onClick={()=>startRound()}>🎮 Start Practice</button>
 <button className="ghost-btn" onClick={()=>{setActiveTab("lookup");setScreen("lookup");}}>🔍 Look Up a Key</button>
 <button className="ghost-btn" onClick={()=>setScreen("ptModeSelect")}>🇧🇷 Notas em Português</button>
+{studentInstrument==="guitar"&&<button className="ghost-btn" onClick={startChordQuiz}>🎸 Chord Diagrams</button>}
 <button className="ghost-btn" onClick={()=>setScreen("stylePick")}>Change Learning Style</button>
 </div>
 <StudentNav active="circle"/>
