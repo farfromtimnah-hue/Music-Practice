@@ -142,6 +142,33 @@ steps.push({ type:"chord", question:`What is the ${ordinal} chord?`, options:shu
 return steps;
 }
 
+// ============================================================
+// PORTUGUESE NOTE NAMES
+// ============================================================
+const NOTE_NAMES = [
+  { en:"C", pt:"Dó"  },
+  { en:"D", pt:"Ré"  },
+  { en:"E", pt:"Mi"  },
+  { en:"F", pt:"Fá"  },
+  { en:"G", pt:"Sol" },
+  { en:"A", pt:"Lá"  },
+  { en:"B", pt:"Si"  },
+];
+
+function buildPortugueseRound(mode) {
+  return shuffle(NOTE_NAMES).map(note => {
+    if (mode === "en-pt") {
+      const correct = note.pt;
+      const wrongs = shuffle(NOTE_NAMES.filter(n=>n.en!==note.en)).slice(0,3).map(n=>n.pt);
+      return { question:`What is ${note.en} called in Portuguese?`, options:shuffle([correct,...wrongs]), correct };
+    } else {
+      const correct = note.en;
+      const wrongs = shuffle(NOTE_NAMES.filter(n=>n.en!==note.en)).slice(0,3).map(n=>n.en);
+      return { question:`What English note is called ${note.pt}?`, options:shuffle([correct,...wrongs]), correct };
+    }
+  });
+}
+
 function logActivity(name, activity) {
 try {
 const existing = JSON.parse(localStorage.getItem("c5Log")||"[]");
@@ -546,6 +573,12 @@ const [answered, setAnswered]         = useState(false);
 const [stepResults, setStepResults]   = useState([]);
 const [multiSelected, setMultiSelected] = useState([]);
 const [activeTab, setActiveTab]       = useState("circle");
+const [ptMode, setPtMode]             = useState(null);
+const [ptSteps, setPtSteps]           = useState([]);
+const [ptIdx, setPtIdx]               = useState(0);
+const [ptAns, setPtAns]               = useState(null);
+const [ptAnswered, setPtAnswered]     = useState(false);
+const [ptResults, setPtResults]       = useState([]);
 
 const timer = useRef(null);
 const resetTimer = useCallback(() => {
@@ -644,6 +677,28 @@ setScreen("results");
 } else { setStepIdx(next); setSelectedAns(null); setAnswered(false); setMultiSelected([]); }
 };
 
+const startPortugueseQuiz = (mode) => {
+setPtMode(mode);
+setPtSteps(buildPortugueseRound(mode));
+setPtIdx(0); setPtAns(null); setPtAnswered(false); setPtResults([]);
+setScreen("ptQuiz");
+logActivity(studentName,{type:"pt_quiz_start",mode});
+};
+
+const handlePtAnswer = (opt) => {
+if (ptAnswered) return;
+setPtAns(opt); setPtAnswered(true);
+setPtResults(r=>[...r, opt===ptSteps[ptIdx].correct]);
+};
+
+const handlePtNext = () => {
+const next=ptIdx+1;
+if (next>=ptSteps.length){
+logActivity(studentName,{type:"pt_quiz_complete",correct:ptResults.filter(Boolean).length,total:7});
+setScreen("ptResults");
+} else { setPtIdx(next); setPtAns(null); setPtAnswered(false); }
+};
+
 const step=steps[stepIdx];
 const isMultiSelect = step?.type==="whichSelect"||step?.type==="majorSelect";
 const circleIdx=currentKey?CIRCLE_ORDER.indexOf(currentKey.name):-1;
@@ -657,6 +712,9 @@ const isRight = answered && (
 const styleLabel={visual:"👁 Visual",kinesthetic:"🤸 Hands-On",auditory:"👂 Listening"};
 
 const goHome=()=>setScreen(isTeacher?"teacherHome":"home");
+
+const ptStep = ptSteps[ptIdx];
+const ptIsRight = ptAnswered && ptAns===ptStep?.correct;
 
 // NAV BARS
 const StudentNav = ({active}) => (
@@ -978,6 +1036,78 @@ return (
 
 }
 
+// PORTUGUESE MODE SELECT
+if (screen==="ptModeSelect") return (
+<><style>{S}</style>
+<div className="center-screen">
+<div className="screen-title">Notas em Português</div>
+<div className="screen-sub">Choose a direction to practice</div>
+<div className="vlist">
+<button className="card-btn" onClick={()=>startPortugueseQuiz("en-pt")}>
+English → Português
+<span className="card-btn-sub">C, D, E ... → Dó, Ré, Mi ...</span>
+</button>
+<button className="card-btn" onClick={()=>startPortugueseQuiz("pt-en")}>
+Português → English
+<span className="card-btn-sub">Dó, Ré, Mi ... → C, D, E ...</span>
+</button>
+</div>
+<button className="ghost-btn" style={{maxWidth:320}} onClick={()=>setScreen("home")}>← Back</button>
+</div></>
+);
+
+// PORTUGUESE QUIZ
+if (screen==="ptQuiz"&&ptStep) return (
+<><style>{S}</style>
+<div className="shell">
+<div className="quiz-screen">
+<div className="prog-bar">{ptSteps.map((_,i)=><div key={i} className={`pip ${i<=ptIdx?"on":""}`}/>)}</div>
+<div style={{fontSize:12,color:"var(--muted)",letterSpacing:2,textTransform:"uppercase"}}>
+{ptMode==="en-pt"?"English → Português":"Português → English"} · {ptIdx+1} of 7
+</div>
+<div className="big-q">{ptStep.question}</div>
+<div className="ans-list">
+{ptStep.options.map(opt=>{
+let cls="ans";
+if(ptAnswered){if(opt===ptStep.correct)cls+=" reveal";else if(opt===ptAns)cls+=" wrong";}
+return <button key={opt} className={cls} onClick={()=>handlePtAnswer(opt)} disabled={ptAnswered}>{opt}</button>;
+})}
+</div>
+{ptAnswered&&(
+<div style={{textAlign:"center",fontSize:18,fontWeight:700,color:ptIsRight?"var(--green)":"var(--dim)"}}>
+{ptIsRight?"Sim! ✓":`Quase! The answer was ${ptStep.correct}`}
+</div>
+)}
+{ptAnswered&&(
+<button className="primary-btn" onClick={handlePtNext}>{ptIdx+1>=ptSteps.length?"See Results →":"Next →"}</button>
+)}
+<button className="ghost-btn" onClick={()=>setScreen("home")}>← Exit</button>
+</div>
+</div></>
+);
+
+// PORTUGUESE RESULTS
+if (screen==="ptResults") {
+const ptCorrect=ptResults.filter(Boolean).length;
+const ptPct=Math.round((ptCorrect/7)*100);
+const ptMsg=ptPct===100?"Perfeito! You know all 7 notes!":ptPct>=80?"Almost perfect — keep it up!":ptPct>=60?"Good effort — try again to lock it in.":"Keep practicing — it gets easier!";
+return (
+<><style>{S}</style>
+<div className="results-screen">
+<div style={{fontSize:13,letterSpacing:3,color:"var(--muted)",textTransform:"uppercase"}}>Notas em Português</div>
+<div style={{fontSize:14,color:"var(--muted)"}}>{ptMode==="en-pt"?"English → Português":"Português → English"}</div>
+<div className="r-score">{ptCorrect}/7</div>
+<div style={{fontSize:16,color:"var(--muted)"}}>{ptPct}%</div>
+<div style={{fontSize:17,color:"var(--text)",maxWidth:280,lineHeight:1.5,textAlign:"center"}}>{ptMsg}</div>
+<div style={{display:"flex",flexDirection:"column",gap:10,width:"100%",maxWidth:300}}>
+<button className="primary-btn" onClick={()=>startPortugueseQuiz(ptMode)}>Play Again</button>
+<button className="ghost-btn" onClick={()=>setScreen("ptModeSelect")}>Switch Mode</button>
+<button className="ghost-btn" onClick={()=>setScreen("home")}>Back to Home</button>
+</div>
+</div></>
+);
+}
+
 // STUDENT HOME
 return (
 <><style>{S}</style>
@@ -997,6 +1127,7 @@ return (
 <div style={{textAlign:"center",fontSize:12,color:"var(--muted)"}}>One step back = the 4 · One step forward = the 5</div>
 <button className="primary-btn" onClick={()=>startRound()}>🎮 Start Practice</button>
 <button className="ghost-btn" onClick={()=>{setActiveTab("lookup");setScreen("lookup");}}>🔍 Look Up a Key</button>
+<button className="ghost-btn" onClick={()=>setScreen("ptModeSelect")}>🇧🇷 Notas em Português</button>
 <button className="ghost-btn" onClick={()=>setScreen("stylePick")}>Change Learning Style</button>
 </div>
 <StudentNav active="circle"/>

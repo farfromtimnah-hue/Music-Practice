@@ -1,6 +1,36 @@
 # Music Practice App — Change Log
 
 ---
+## 2026-06-03 — Phase 3: Portuguese Note Names Quiz
+
+### What Was Changed
+- `src/App.jsx` — added new data, helper, state, handlers, screens, and home button
+
+### What Was Added
+- `NOTE_NAMES` constant: 7 note pairs `{ en, pt }` — C/Dó, D/Ré, E/Mi, F/Fá, G/Sol, A/Lá, B/Si
+- `buildPortugueseRound(mode)` helper: shuffles all 7 notes, builds one question object per note with 4 answer choices (1 correct + 3 random wrong from the same list)
+- 6 new React state variables: `ptMode`, `ptSteps`, `ptIdx`, `ptAns`, `ptAnswered`, `ptResults`
+- `startPortugueseQuiz(mode)` — initializes and starts the quiz for either mode, logs to `c5Log`
+- `handlePtAnswer(opt)` — records single-choice answer and marks step answered
+- `handlePtNext()` — advances to next question or navigates to results; logs completion to `c5Log`
+- `ptStep` / `ptIsRight` computed values derived each render
+- `ptModeSelect` screen: mode picker with two card-buttons (English→Português / Português→English) and a Back button
+- `ptQuiz` screen: 7-question quiz using `.quiz-screen`, `.prog-bar`, `.pip`, `.ans/.reveal/.wrong` — same visual language as the rest of the app; correct feedback "Sim! ✓", incorrect feedback "Quase! The answer was [X]"; Next → / See Results → button advances flow
+- `ptResults` screen: shows X/7 score, percentage, encouraging message, Play Again / Switch Mode / Back to Home buttons
+- "🇧🇷 Notas em Português" button on student home screen (above "Change Learning Style")
+
+### Known Issues or Limitations
+- None noted
+
+### Manual Steps Required
+- Fix npm cache permissions if not already done: `sudo chown -R 501:20 "/Users/nicolel/.npm"`
+- Then: `cd ~/Music-Practice && npm install && git push`
+- GitHub Actions deploys automatically after push
+
+### Next Phase
+- Phase 4: Bass fretboard quiz for Bernardo (open strings + first 7 frets, 4 strings)
+
+---
 ## 2026-06-02 — Phase 2 Fix: Sharps/Flats Button Labels
 
 ### What Was Changed
