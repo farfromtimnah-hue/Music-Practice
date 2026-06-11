@@ -631,6 +631,24 @@ const STRING_LABELS = ["E", "A", "D", "G", "B", "e"]; // low E (6th) → high e 
 const fbStringX = s => FB.marginLeft + s * FB.stringGap;
 const fbBoardW  = FB.marginLeft + 5 * FB.stringGap + FB.marginRight;
 
+// Standard guitar inlay/position markers: single dot at frets 3 & 5,
+// double dot at fret 7. Always-on neck landmarks (not part of the quiz).
+// Centered between the middle two strings (G idx 3 · B idx 4), pearl/cream.
+const FB_MARKER_FRETS = [3, 5, 7];
+const fbMarkerX = (fbStringX(3) + fbStringX(4)) / 2;
+function FretMarkers({ frets, dotY }) {
+  const R = 5;
+  return frets.map(f => f === 7
+    ? (
+      <g key={`m${f}`}>
+        <circle cx={fbMarkerX - 9} cy={dotY(f)} r={R} fill="#f0ead6" opacity="0.55" />
+        <circle cx={fbMarkerX + 9} cy={dotY(f)} r={R} fill="#f0ead6" opacity="0.55" />
+      </g>
+    )
+    : <circle key={`m${f}`} cx={fbMarkerX} cy={dotY(f)} r={R} fill="#f0ead6" opacity="0.55" />
+  );
+}
+
 function ChordDiagram({ chord }) {
   const { stringGap, fretGap, dotR: R, marginTop: mT } = FB;
   const ROWS = 5; // visible fret rows in the static diagram
@@ -690,6 +708,8 @@ function ChordDiagram({ chord }) {
         <line key={`s${s}`} x1={fbStringX(s)} y1={mT} x2={fbStringX(s)} y2={fretLineY(ROWS)}
           stroke="#3a3a52" strokeWidth="2" />
       ))}
+      {/* fret position markers (only those within the visible fret window) */}
+      <FretMarkers frets={FB_MARKER_FRETS.filter(f => f >= baseFret && f <= baseFret + ROWS - 1)} dotY={dotY} />
       {/* barre bar */}
       {hasBarre && (
         <rect x={bx1 - R} y={bcy - R} width={bx2 - bx1 + 2 * R} height={2 * R} rx={R}
@@ -756,6 +776,8 @@ function InteractiveFretboard({ tapped, onTap, disabled }) {
         <line key={`s${s}`} x1={fbStringX(s)} y1={mT} x2={fbStringX(s)} y2={fretLineY(FRETS)}
           stroke="#3a3a52" strokeWidth="2" />
       ))}
+      {/* fret position markers — frets 3, 5, 7 are all within the visible 1–7 range */}
+      <FretMarkers frets={FB_MARKER_FRETS} dotY={dotY} />
       {/* tappable intersections */}
       {[1, 2, 3, 4, 5, 6, 7].flatMap(f => [0, 1, 2, 3, 4, 5].map(s => {
         const key = `${s}-${f}`;

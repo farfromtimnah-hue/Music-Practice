@@ -1,6 +1,29 @@
 # Music Practice App — Change Log
 
 ---
+## 2026-06-11 — Phase 6: Fret Markers on Julia's Chord Diagrams
+
+### What Was Changed
+- `src/App.jsx` — added standard guitar fret position markers (inlay dots) to both guitar fretboard surfaces. The markers are purely decorative neck landmarks; nothing about the chord library, quiz flow, Show Me / Check Answer / Skip buttons, string order, or any tap/scoring logic was touched.
+- `ChordDiagram` (the static diagram shown when revealing an answer) — renders markers for any of frets 3/5/7 that fall inside the diagram's visible fret window (`baseFret … baseFret+4`). So a nut-position chord shows dots at 3 and 5; a raised-position chord like G#m (window 4–8) shows the dot at 5 and the double-dot at 7.
+- `InteractiveFretboard` (the tappable board Julia uses to input answers) — renders markers at frets 3, 5, and 7 (all within its fixed 1–7 range). Markers are drawn before the transparent tap targets, so they sit visually behind and do not affect tapping.
+
+### What Was Added
+- `FB_MARKER_FRETS = [3, 5, 7]` and `fbMarkerX` (the x-coordinate centered between the middle two strings — G (index 3) and B (index 4)).
+- `FretMarkers({ frets, dotY })` component: draws a single pearl/cream (`#f0ead6`, opacity 0.55) circle (r=5) at each fret, and a double dot (two circles offset ±9px) at fret 7 — the standard guitar convention. Reused by both fretboard components so they stay identical.
+
+### Known Issues or Limitations
+- Markers are intentionally always-on and are not tappable / not part of the answer; they sit between strings so they never overlap a finger dot or a tapped position.
+- On the static diagram, only markers within the visible 5-fret window are drawn (correct neck-orientation behavior), so nut-position chords don't show the fret-7 double dot.
+- The double dot is placed at fret 7 per the brief (a real neck's double dot is at fret 12); single dots match real necks at 3 and 5.
+
+### Manual Steps Required
+- None. Verified locally in a 375×812 mobile viewport (logged in as Julia): the interactive board shows single dots at frets 3 and 5 and a double dot at fret 7, all centered between the G and B strings in subtle cream; the static reveal diagram (Asus2) shows the in-window dots at 3 and 5 behind the finger dots. `npm run build` passes; no console errors.
+
+### Next Phase
+- Phase 7: Full teacher mode audit — confirm all student sections visible
+
+---
 ## 2026-06-11 — Phase 5 Fix: Bass String Order
 
 ### What Was Changed
