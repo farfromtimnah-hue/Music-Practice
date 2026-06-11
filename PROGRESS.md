@@ -1,6 +1,25 @@
 # Music Practice App — Change Log
 
 ---
+## 2026-06-11 — Phase 5 Fix: Bass String Order
+
+### What Was Changed
+- `src/App.jsx` — reordered the `BASS_STRINGS` array from top→bottom **G · D · A · E** to **E · A · D · G**, matching how a bassist sees the neck looking down while playing (low E on top, high G on bottom). Updated the component's doc comment to describe the new order.
+- Because the fretboard renders one row per array entry and every consumer (note labels, `glowString`/`glowCell` highlighting, and the three round builders `buildBassStringRound` / `buildBassFindRound` / `buildBassNameRound`) references `BASS_STRINGS` by index, this single reorder updates all of: row positions, the always-on note-name labels per string, string thickness (E keeps the thickest `w:4.8` on top, G keeps the thinnest `w:1.6` on bottom), and which string/cell the quiz highlights when it asks a question.
+
+### What Was Added
+- Nothing — this is a pure reorder of existing data.
+
+### Known Issues or Limitations
+- None. Fret position markers (still drawn between array indices 1 and 2, which remain the middle two strings — now A and D) are unchanged, as are all visual styling and every other part of the app.
+
+### Manual Steps Required
+- None. Verified locally in a 390×844 mobile viewport (logged in as Bernardo): the board now reads top→bottom E (thickest) · A · D · G (thinnest); the note rows match the spec (E: E F F# G G# A A# B … G: G G# A A# B C C# D); inlay dots still sit at frets 3/5/7 between the middle two strings; and String Names highlights the correct string in the new order (the top E string glows and answering "E" returns "Yes! 🎸"). `npm run build` passes; no console errors.
+
+### Next Phase
+- Phase 6: Add fret position markers to Julia's chord diagrams
+
+---
 ## 2026-06-11 — Phase 5: Bass Fretboard Quiz (Bernardo)
 
 ### What Was Changed

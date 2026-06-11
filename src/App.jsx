@@ -777,15 +777,16 @@ function InteractiveFretboard({ tapped, onTap, disabled }) {
 // ============================================================
 // BASS FRETBOARD (Bernardo) — realistic 4-string bass neck
 // Horizontal orientation: nut at the LEFT, frets run vertically,
-// strings run horizontally. Strings top→bottom: G (thin) · D · A · E (thick).
+// strings run horizontally. Strings top→bottom: E (thick) · A · D · G (thin)
+// — how a bassist sees the neck looking down while playing.
 // Frets 0 (open) through 7. Note names always visible at every
 // string/fret intersection. Inlay dots mark frets 3, 5, 7.
 // ============================================================
 const BASS_STRINGS = [
-  { name: "G", notes: ["G", "G#", "A", "A#", "B", "C", "C#", "D"], w: 1.6 }, // 1st — thinnest, top
-  { name: "D", notes: ["D", "D#", "E", "F", "F#", "G", "G#", "A"], w: 2.5 }, // 2nd
-  { name: "A", notes: ["A", "A#", "B", "C", "C#", "D", "D#", "E"], w: 3.5 }, // 3rd
-  { name: "E", notes: ["E", "F", "F#", "G", "G#", "A", "A#", "B"], w: 4.8 }, // 4th — thickest, bottom
+  { name: "E", notes: ["E", "F", "F#", "G", "G#", "A", "A#", "B"], w: 4.8 }, // top — thickest (low E)
+  { name: "A", notes: ["A", "A#", "B", "C", "C#", "D", "D#", "E"], w: 3.5 },
+  { name: "D", notes: ["D", "D#", "E", "F", "F#", "G", "G#", "A"], w: 2.5 },
+  { name: "G", notes: ["G", "G#", "A", "A#", "B", "C", "C#", "D"], w: 1.6 }, // bottom — thinnest
 ];
 const BASS_NOTE_POOL = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const BASS_MARKER_FRETS = [3, 5, 7];
