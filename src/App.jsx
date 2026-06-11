@@ -775,6 +775,173 @@ function InteractiveFretboard({ tapped, onTap, disabled }) {
 }
 
 // ============================================================
+// BASS FRETBOARD (Bernardo) — realistic 4-string bass neck
+// Horizontal orientation: nut at the LEFT, frets run vertically,
+// strings run horizontally. Strings top→bottom: G (thin) · D · A · E (thick).
+// Frets 0 (open) through 7. Note names always visible at every
+// string/fret intersection. Inlay dots mark frets 3, 5, 7.
+// ============================================================
+const BASS_STRINGS = [
+  { name: "G", notes: ["G", "G#", "A", "A#", "B", "C", "C#", "D"], w: 1.6 }, // 1st — thinnest, top
+  { name: "D", notes: ["D", "D#", "E", "F", "F#", "G", "G#", "A"], w: 2.5 }, // 2nd
+  { name: "A", notes: ["A", "A#", "B", "C", "C#", "D", "D#", "E"], w: 3.5 }, // 3rd
+  { name: "E", notes: ["E", "F", "F#", "G", "G#", "A", "A#", "B"], w: 4.8 }, // 4th — thickest, bottom
+];
+const BASS_NOTE_POOL = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const BASS_MARKER_FRETS = [3, 5, 7];
+const BASS_FRETS = 7;
+const BG = {
+  stringGap: 44,
+  fretGap: 58,
+  marginTop: 40,   // room for fret numbers above the board
+  marginLeft: 54,  // room for the open-string (fret 0) notes left of the nut
+  marginRight: 16,
+  marginBottom: 18,
+};
+const bassStringY = s => BG.marginTop + s * BG.stringGap;
+const bassNutX = BG.marginLeft;
+const bassFretLineX = i => bassNutX + i * BG.fretGap;
+const bassNoteX = f => (f === 0 ? bassNutX - 28 : bassNutX + (f - 0.5) * BG.fretGap);
+const bassBoardW = bassNutX + BASS_FRETS * BG.fretGap + BG.marginRight;
+const bassBoardH = BG.marginTop + 3 * BG.stringGap + BG.marginBottom;
+
+function BassFretboard({ glowString = null, glowCell = null, greenCell = null, redCell = null, onTap = null }) {
+  const boardTop = bassStringY(0) - 18;
+  const boardBot = bassStringY(3) + 18;
+  const boardLeft = bassNutX;
+  const boardRight = bassFretLineX(BASS_FRETS);
+  const W = bassBoardW, H = bassBoardH;
+  const cellEq = (a, b) => !!a && !!b && a.s === b.s && a.fret === b.fret;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: W, height: "auto", touchAction: "manipulation" }}
+      role="img" aria-label="Bass fretboard">
+      <defs>
+        <linearGradient id="bassWood" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#5a3a22" />
+          <stop offset="0.5" stopColor="#3a2416" />
+          <stop offset="1" stopColor="#2a1810" />
+        </linearGradient>
+      </defs>
+
+      {/* fret-number landmarks above the board */}
+      {[0, 1, 2, 3, 4, 5, 6, 7].map(f => (
+        <text key={`fn${f}`} x={bassNoteX(f)} y={boardTop - 7} textAnchor="middle" fontSize="11"
+          fill="#8888aa" fontFamily="Oswald,sans-serif">{f}</text>
+      ))}
+
+      {/* fretboard wood */}
+      <rect x={boardLeft} y={boardTop} width={boardRight - boardLeft} height={boardBot - boardTop}
+        rx="4" fill="url(#bassWood)" stroke="#1c1009" strokeWidth="1.5" />
+
+      {/* inlay position markers at frets 3, 5, 7 — between the middle two strings */}
+      {BASS_MARKER_FRETS.map(f => (
+        <circle key={`m${f}`} cx={bassNoteX(f)} cy={(bassStringY(1) + bassStringY(2)) / 2}
+          r="7" fill="#f0ead6" opacity="0.9" />
+      ))}
+
+      {/* metal frets (vertical) */}
+      {[1, 2, 3, 4, 5, 6, 7].map(i => (
+        <line key={`fr${i}`} x1={bassFretLineX(i)} y1={boardTop} x2={bassFretLineX(i)} y2={boardBot}
+          stroke="#c4c4cc" strokeWidth="3" />
+      ))}
+      {/* nut — cream/bone bar at the left edge */}
+      <rect x={bassNutX - 5} y={boardTop} width="6" height={boardBot - boardTop} rx="1.5" fill="#e8dcc0" />
+
+      {/* steel strings (horizontal) — thickness varies, E thickest */}
+      {BASS_STRINGS.map((st, s) => {
+        const y = bassStringY(s);
+        const isGlow = glowString === s;
+        return (
+          <g key={`str${s}`}>
+            {isGlow && (
+              <line x1={bassNutX - 5} y1={y} x2={boardRight} y2={y}
+                stroke="#f0c040" strokeWidth={st.w + 12} opacity="0.25" strokeLinecap="round" />
+            )}
+            <line x1={bassNutX - 5} y1={y} x2={boardRight} y2={y}
+              stroke={isGlow ? "#f0c040" : "#cfcfd8"} strokeWidth={st.w} strokeLinecap="round" />
+          </g>
+        );
+      })}
+
+      {/* note labels at every string/fret intersection */}
+      {BASS_STRINGS.flatMap((st, s) =>
+        st.notes.map((note, f) => {
+          const x = bassNoteX(f), y = bassStringY(s);
+          const isGreen = cellEq(greenCell, { s, fret: f });
+          const isRed = cellEq(redCell, { s, fret: f });
+          const isGlow = cellEq(glowCell, { s, fret: f });
+          let bg = "rgba(20,12,6,0.80)", fg = "#f3ecdd", stroke = "rgba(240,234,214,0.28)";
+          if (isGreen) { bg = "#2e7d32"; fg = "#eaffea"; stroke = "#81c784"; }
+          else if (isRed) { bg = "#c62828"; fg = "#ffecec"; stroke = "#ef5350"; }
+          else if (isGlow) { bg = "#f0c040"; fg = "#1a1208"; stroke = "#f0c040"; }
+          const r = note.length > 1 ? 13 : 12;
+          return (
+            <g key={`n${s}-${f}`}>
+              <circle cx={x} cy={y} r={r} fill={bg} stroke={stroke} strokeWidth="1.2" />
+              <text x={x} y={y + 4} textAnchor="middle" fontSize={note.length > 1 ? "12" : "13"}
+                fontWeight="700" fontFamily="Oswald,sans-serif" fill={fg}>{note}</text>
+            </g>
+          );
+        })
+      )}
+
+      {/* tappable intersections (Find-the-Note mode) */}
+      {onTap && BASS_STRINGS.flatMap((st, s) =>
+        st.notes.map((note, f) => {
+          const x = bassNoteX(f), y = bassStringY(s);
+          return (
+            <rect key={`t${s}-${f}`} x={x - BG.fretGap / 2} y={y - BG.stringGap / 2}
+              width={BG.fretGap} height={BG.stringGap} fill="transparent"
+              style={{ cursor: "pointer" }} onClick={() => onTap(s, f)} />
+          );
+        })
+      )}
+    </svg>
+  );
+}
+
+function buildBassStringRound() {
+  return shuffle([0, 1, 2, 3]).map(s => ({
+    mode: "string",
+    stringIdx: s,
+    question: "What is the name of this string?",
+    options: shuffle(["E", "A", "D", "G"]),
+    correct: BASS_STRINGS[s].name,
+  }));
+}
+
+function buildBassFindRound() {
+  const out = [];
+  for (let i = 0; i < 10; i++) {
+    const s = Math.floor(Math.random() * 4);
+    const f = Math.floor(Math.random() * 8);
+    const note = BASS_STRINGS[s].notes[f];
+    out.push({
+      mode: "find", stringIdx: s, fret: f, note,
+      question: `Tap the note ${note} on the ${BASS_STRINGS[s].name} string`,
+    });
+  }
+  return out;
+}
+
+function buildBassNameRound() {
+  const out = [];
+  for (let i = 0; i < 10; i++) {
+    const s = Math.floor(Math.random() * 4);
+    const f = Math.floor(Math.random() * 8);
+    const correct = BASS_STRINGS[s].notes[f];
+    const wrongs = shuffle(BASS_NOTE_POOL.filter(n => n !== correct)).slice(0, 3);
+    out.push({
+      mode: "name", stringIdx: s, fret: f, correct,
+      options: shuffle([correct, ...wrongs]),
+      question: "What note is this?",
+    });
+  }
+  return out;
+}
+
+// ============================================================
 // APP
 // ============================================================
 export default function App() {
@@ -813,6 +980,13 @@ const [cdCorrect, setCdCorrect]       = useState([]);
 const [cdWrong, setCdWrong]           = useState([]);
 const [cdNotYet, setCdNotYet]         = useState([]);
 const [cdSkipped, setCdSkipped]       = useState([]);
+const [bassMode, setBassMode]         = useState(null);   // "string" | "find" | "name"
+const [bassSteps, setBassSteps]       = useState([]);
+const [bassIdx, setBassIdx]           = useState(0);
+const [bassAns, setBassAns]           = useState(null);   // selected button (string/name modes)
+const [bassAnswered, setBassAnswered] = useState(false);
+const [bassResults, setBassResults]   = useState([]);
+const [bassTap, setBassTap]           = useState(null);   // tapped cell {s,fret} (find mode)
 
 const timer = useRef(null);
 const resetTimer = useCallback(() => {
@@ -980,6 +1154,36 @@ if(next>=cdQueue.length){logActivity(studentName||"teacher",{type:"chord_quiz_co
 else{setCdIdx(next);setCdTapped([]);setCdPhase("quiz");setCdFeedback(null);}
 };
 
+const startBassQuiz = (mode) => {
+const steps = mode==="string"?buildBassStringRound():mode==="find"?buildBassFindRound():buildBassNameRound();
+setBassMode(mode); setBassSteps(steps); setBassIdx(0);
+setBassAns(null); setBassAnswered(false); setBassResults([]); setBassTap(null);
+setScreen("bassQuiz");
+logActivity(studentName||"teacher",{type:"bass_quiz_start",mode});
+};
+
+const handleBassAnswer = (opt) => {            // string & name modes
+if(bassAnswered)return;
+setBassAns(opt); setBassAnswered(true);
+setBassResults(r=>[...r, opt===bassSteps[bassIdx].correct]);
+};
+
+const handleBassTap = (s,f) => {               // find mode
+if(bassAnswered)return;
+const st=bassSteps[bassIdx];
+const ok = s===st.stringIdx && f===st.fret;
+setBassTap({s,fret:f}); setBassAnswered(true);
+setBassResults(r=>[...r, ok]);
+};
+
+const handleBassNext = () => {
+const next=bassIdx+1;
+if(next>=bassSteps.length){
+logActivity(studentName||"teacher",{type:"bass_quiz_complete",mode:bassMode,correct:bassResults.filter(Boolean).length,total:bassSteps.length});
+setScreen("bassResults");
+} else { setBassIdx(next); setBassAns(null); setBassAnswered(false); setBassTap(null); }
+};
+
 const step=steps[stepIdx];
 const isMultiSelect = step?.type==="whichSelect"||step?.type==="majorSelect";
 const circleIdx=currentKey?CIRCLE_ORDER.indexOf(currentKey.name):-1;
@@ -1001,6 +1205,9 @@ const cdChord = cdQueue[cdIdx];
 const cdExpected = cdChord
 ? cdChord.frets.map((f,s)=>f>0?`${s}-${f}`:null).filter(Boolean)
 : [];
+
+const bassStep = bassSteps[bassIdx];
+const bassIsRight = bassAnswered && bassResults[bassIdx];
 
 // NAV BARS
 const StudentNav = ({active}) => (
@@ -1136,6 +1343,7 @@ Tap a key on the circle to lock it for students.<br/>
 <button className="ghost-btn" onClick={()=>{setActiveTab("lookup");setScreen("lookup");}}>🔍 Look Up a Key</button>
 <button className="ghost-btn" onClick={()=>setScreen("ptModeSelect")}>🇧🇷 Notas em Português</button>
 <button className="ghost-btn" onClick={startChordQuiz}>🎸 Chord Diagrams</button>
+<button className="ghost-btn" onClick={()=>setScreen("bassModeSelect")}>🎸 Bass Fretboard</button>
 <button className="teacher-btn" onClick={()=>setScreen("settings")}>⚙️ View Students</button>
 </div>
 <TeacherNav active="circle"/>
@@ -1442,6 +1650,105 @@ return <div key={i} className={c}/>;
 </div></>
 );
 
+// BASS MODE SELECT
+if (screen==="bassModeSelect") return (
+<><style>{S}</style>
+<div className="center-screen">
+<div className="screen-title">🎸 Bass Fretboard</div>
+<div className="screen-sub">Pick a way to practice your bass.</div>
+<div className="vlist">
+<button className="card-btn" onClick={()=>startBassQuiz("string")}>
+🎸 String Names
+<span className="card-btn-sub">Name each string — E · A · D · G</span>
+</button>
+<button className="card-btn" onClick={()=>startBassQuiz("find")}>
+🎯 Find the Note
+<span className="card-btn-sub">Tap the right fret on the right string</span>
+</button>
+<button className="card-btn" onClick={()=>startBassQuiz("name")}>
+🔤 Name That Note
+<span className="card-btn-sub">What note is this fret?</span>
+</button>
+</div>
+<button className="ghost-btn" style={{maxWidth:320}} onClick={goHome}>← Back</button>
+</div></>
+);
+
+// BASS QUIZ
+if (screen==="bassQuiz"&&bassStep) {
+const isFind = bassMode==="find";
+const modeLabel = bassMode==="string"?"String Names":bassMode==="find"?"Find the Note":"Name That Note";
+const answerWord = bassMode==="find"?bassStep.note:bassStep.correct;
+return (
+<><style>{S}</style>
+<div className="shell">
+<div className="cd-screen">
+<div className="g-header">
+<button style={{background:"none",border:"none",color:"var(--muted)",fontSize:14,cursor:"pointer",fontFamily:"'Source Sans 3',sans-serif"}} onClick={()=>setScreen("bassModeSelect")}>← Exit</button>
+<div style={{fontSize:11,color:"var(--muted)",letterSpacing:2,textTransform:"uppercase"}}>{bassIdx+1} / {bassSteps.length}</div>
+</div>
+<div className="step-prog">
+{bassSteps.map((_,i)=>{let c="sp";if(i<bassIdx)c+=bassResults[i]?" ok":" no";else if(i===bassIdx)c+=" cur";return <div key={i} className={c}/>;})}
+</div>
+<div className="cd-sub">{modeLabel}</div>
+<div className="q-card"><div className="q-text" style={{textAlign:"center"}}>{bassStep.question}</div></div>
+<div className="cd-fretboard-wrap">
+{bassMode==="string"&&<BassFretboard glowString={bassStep.stringIdx}/>}
+{bassMode==="name"&&<BassFretboard glowCell={{s:bassStep.stringIdx,fret:bassStep.fret}}/>}
+{isFind&&<BassFretboard
+onTap={bassAnswered?null:handleBassTap}
+greenCell={bassAnswered?{s:bassStep.stringIdx,fret:bassStep.fret}:null}
+redCell={bassAnswered&&bassTap&&!(bassTap.s===bassStep.stringIdx&&bassTap.fret===bassStep.fret)?bassTap:null}/>}
+</div>
+{!isFind&&(
+<div className="ans-list">
+{bassStep.options.map(opt=>{
+let cls="ans";
+if(bassAnswered){if(opt===bassStep.correct)cls+=" reveal";else if(opt===bassAns)cls+=" wrong";}
+return <button key={opt} className={cls} onClick={()=>handleBassAnswer(opt)} disabled={bassAnswered}>{opt}</button>;
+})}
+</div>
+)}
+{isFind&&!bassAnswered&&(
+<div className="cd-sub" style={{color:"var(--muted)"}}>Tap the fret on the fretboard above</div>
+)}
+{bassAnswered&&(
+<div className={`feedback ${bassIsRight?"ok":"no"}`} style={{fontSize:18}}>
+{bassIsRight?"Yes! 🎸":`Not quite — it's ${answerWord}`}
+</div>
+)}
+{bassAnswered&&(
+<button className="primary-btn" onClick={handleBassNext}>{bassIdx+1>=bassSteps.length?"See Results →":"Next →"}</button>
+)}
+</div>
+</div></>
+);
+}
+
+// BASS RESULTS
+if (screen==="bassResults") {
+const bCorrect=bassResults.filter(Boolean).length;
+const bTotal=bassSteps.length;
+const bPct=Math.round((bCorrect/bTotal)*100);
+const modeLabel = bassMode==="string"?"String Names":bassMode==="find"?"Find the Note":"Name That Note";
+const bMsg=bPct===100?"Perfect! 🎸 You know the whole neck.":bPct>=80?"Really strong — it's clicking.":bPct>=60?"Good effort — run it again to lock it in.":"Keep at it — every rep builds the memory.";
+return (
+<><style>{S}</style>
+<div className="results-screen">
+<div style={{fontSize:13,letterSpacing:3,color:"var(--muted)",textTransform:"uppercase"}}>🎸 Bass Fretboard</div>
+<div style={{fontSize:14,color:"var(--muted)"}}>{modeLabel}</div>
+<div className="r-score">{bPct}%</div>
+<div style={{fontSize:14,color:"var(--muted)"}}>{bCorrect} of {bTotal} correct</div>
+<div style={{fontSize:17,color:"var(--text)",maxWidth:280,lineHeight:1.5,textAlign:"center"}}>{bMsg}</div>
+<div style={{display:"flex",flexDirection:"column",gap:10,width:"100%",maxWidth:300}}>
+<button className="primary-btn" onClick={()=>startBassQuiz(bassMode)}>Play Again</button>
+<button className="ghost-btn" onClick={()=>setScreen("bassModeSelect")}>Switch Mode</button>
+<button className="ghost-btn" onClick={goHome}>Back to Home</button>
+</div>
+</div></>
+);
+}
+
 // CHORD RESULTS
 if (screen==="cdResults") return (
 <><style>{S}</style>
@@ -1505,6 +1812,7 @@ return (
 <button className="ghost-btn" onClick={()=>{setActiveTab("lookup");setScreen("lookup");}}>🔍 Look Up a Key</button>
 <button className="ghost-btn" onClick={()=>setScreen("ptModeSelect")}>🇧🇷 Notas em Português</button>
 {studentInstrument==="guitar"&&<button className="ghost-btn" onClick={startChordQuiz}>🎸 Chord Diagrams</button>}
+{studentInstrument==="bass"&&<button className="ghost-btn" onClick={()=>setScreen("bassModeSelect")}>🎸 Bass Fretboard</button>}
 <button className="ghost-btn" onClick={()=>setScreen("stylePick")}>Change Learning Style</button>
 </div>
 <StudentNav active="circle"/>

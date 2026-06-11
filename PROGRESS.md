@@ -1,6 +1,44 @@
 # Music Practice App — Change Log
 
 ---
+## 2026-06-11 — Phase 5: Bass Fretboard Quiz (Bernardo)
+
+### What Was Changed
+- `src/App.jsx` — wired a new "🎸 Bass Fretboard" button into both home screens:
+  - Student home: shown only when `studentInstrument==="bass"` (so only Bernardo sees it), placed next to the guitar-only Chord Diagrams button.
+  - Teacher home: always shown (teacher can preview every student section), placed after Chord Diagrams.
+- No existing screens, data, styles, or behavior were modified — all Phase 5 work is additive.
+
+### What Was Added
+- **`BassFretboard` SVG component** — a realistic, phone-sized 4-string bass neck:
+  - Horizontal orientation: cream/bone **nut at the LEFT**, silver/metallic **frets running vertically** (fret 1 nearest the nut → fret 7), steel **strings running horizontally**.
+  - String order top→bottom: **G (thinnest) · D · A · E (thickest)**; stroke widths 1.6/2.5/3.5/4.8 so the thickness visibly varies.
+  - Dark-brown wood fretboard via a vertical `bassWood` linear gradient (`#5a3a22→#3a2416→#2a1810`).
+  - **Inlay position dots** (cream/pearl `#f0ead6`) permanently shown at frets 3, 5, 7, centered between the middle two strings (D/A) as navigation landmarks.
+  - **Note names always visible** at every string/fret intersection (frets 0–7), rendered as small Oswald labels in dark pill-circles for contrast.
+  - Muted fret-number landmarks (0–7) along the top.
+  - Display props: `glowString` (gold-glow a whole string), `glowCell` (gold-highlight one intersection), `greenCell`/`redCell` (correct/incorrect feedback), and `onTap(s,f)` for tappable intersections.
+- **Bass note data**: `BASS_STRINGS` (each with `name`, 8-fret `notes` array, and string `w`idth), `BASS_NOTE_POOL`, `BASS_MARKER_FRETS`, geometry constants `BG` + helpers (`bassStringY`, `bassNutX`, `bassFretLineX`, `bassNoteX`, `bassBoardW`, `bassBoardH`).
+- **Three round builders**: `buildBassStringRound()` (all 4 strings, random order — "What is the name of this string?", options E/A/D/G), `buildBassFindRound()` (10 random "Tap the note X on the Y string", frets 0–7), `buildBassNameRound()` (10 random "What note is this?", 4 MC note options).
+- **8 new state vars**: `bassMode`, `bassSteps`, `bassIdx`, `bassAns`, `bassAnswered`, `bassResults`, `bassTap`.
+- **Handlers**: `startBassQuiz(mode)`, `handleBassAnswer(opt)` (string/name modes), `handleBassTap(s,f)` (find mode), `handleBassNext()`. All log activity via `logActivity` (`bass_quiz_start` / `bass_quiz_complete`).
+- **Three screens**:
+  - `bassModeSelect` — mode picker (String Names / Find the Note / Name That Note) + Back.
+  - `bassQuiz` — one question at a time, step-progress bar, the fretboard rendered per mode, answer buttons (string/name) or tap-to-answer (find), feedback ("Yes! 🎸" / "Not quite — it's X"), Next button.
+  - `bassResults` — score %, mode label, encouragement message, Play Again / Switch Mode / Back to Home.
+
+### Known Issues or Limitations
+- Within frets 0–7 each note name is unique per string, so Find-the-Note has exactly one correct cell — no ambiguity. (If the fret range were ever widened past 11, that assumption would need revisiting.)
+- The fretboard is intentionally a learning tool: note names are always shown, so Name-That-Note is a reading exercise rather than pure recall. This matches the brief ("note names are shown, not hidden").
+- Find-the-Note ignores open-string vs fretted technique nuance — fret 0 is treated as a normal tappable position labeled with the open-string note.
+
+### Manual Steps Required
+- None. Verified locally in a 390×844 mobile viewport: logged in as Bernardo (bass) — the Bass Fretboard button appears and all three modes work (String Names glows the right string + "Yes! 🎸"; Find the Note lights the correct fret green and a wrong tap red with "Not quite — it's X"; Name That Note gold-highlights the intersection with 4 MC options). Confirmed Julia (guitar) does **not** see the button and the teacher **does**. `npm run build` passes; no console errors.
+
+### Next Phase
+- Phase 6: Fix fret position markers on Julia's chord diagrams
+
+---
 ## 2026-06-11 — Phase 4 Fix: Chord Diagram Orientation (Julia)
 
 ### What Was Changed
