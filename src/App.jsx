@@ -416,6 +416,7 @@ input{color:var(--text);}
 .cd-cell.need{border-color:var(--green);background:rgba(129,199,132,.07);cursor:default;opacity:.7;}
 .cd-cell:disabled{cursor:default;transform:none;}
 .cd-diagram-wrap{display:flex;justify-content:center;padding:6px 0;}
+.cd-fretboard-wrap{display:flex;justify-content:center;padding:6px 0;}
 .cd-btn-row{display:flex;gap:8px;}
 .cd-btn-row .ghost-btn,.cd-btn-row .primary-btn{flex:1;padding:12px 6px;font-size:13px;}
 .cd-results{display:flex;flex-direction:column;padding:24px 20px 40px;gap:14px;min-height:100vh;}
@@ -610,70 +611,167 @@ return (
 
 // ============================================================
 // CHORD DIAGRAM SVG
+// Shared fretboard geometry — the static diagram and the interactive
+// quiz fretboard use the SAME layout so they look identical:
+//   • nut at the TOP, frets run horizontally, strings run vertically
+//   • strings left→right: low E (6th) · A · D · G · B · high e (1st)
+//   • fret numbers increase downward
+// Sizes are in SVG units that render ~1:1 px on a phone, chosen to meet
+// the readability/tap minimums: string gap 40px, fret gap 46px, dot 34px.
 // ============================================================
+const FB = {
+  stringGap: 40,   // ≥ 36px between strings
+  fretGap:   46,   // ≥ 44px between frets
+  dotR:      17,   // 34px diameter ≥ 32px
+  marginLeft: 42,  // room for fret-number labels on the left
+  marginRight: 24,
+  marginTop: 54,   // room for string labels + O/X markers + the nut
+};
+const STRING_LABELS = ["E", "A", "D", "G", "B", "e"]; // low E (6th) → high e (1st)
+const fbStringX = s => FB.marginLeft + s * FB.stringGap;
+const fbBoardW  = FB.marginLeft + 5 * FB.stringGap + FB.marginRight;
+
 function ChordDiagram({ chord }) {
-const SX=[30,54,78,102,126,150]; // string x: low E to high e
-const NUT_Y=38, FRET_H=28, R=11;
-const used=chord.frets.filter(f=>f>0);
-const baseFret=used.length>0?Math.min(...used):1;
-const dotY=f=>NUT_Y+(f-baseFret)*FRET_H+FRET_H/2;
-// Barre
-const barreFret=chord.barre?(chord.frets.find((f,s)=>chord.fingers[s]===1&&f>0)??null):null;
-const barreStr=chord.barre&&barreFret!==null
-?chord.frets.reduce((a,f,s)=>{if(chord.fingers[s]===1&&f===barreFret)a.push(s);return a;},[])
-:[];
-const bx1=barreStr.length>=2?SX[barreStr[0]]:0;
-const bx2=barreStr.length>=2?SX[barreStr[barreStr.length-1]]:0;
-const bcy=barreFret!==null?dotY(barreFret):0;
-return(
-<svg viewBox="0 0 180 195" style={{width:"100%",maxWidth:200,height:"auto"}}>
-{["E","A","D","G","B","e"].map((l,s)=>(
-<text key={s} x={SX[s]} y={13} textAnchor="middle" fontSize="11"
-fontWeight="600" fill="#8888aa" fontFamily="Oswald,sans-serif">{l}</text>
-))}
-{chord.frets.map((f,s)=>{
-if(f===0)return<text key={s} x={SX[s]} y={29} textAnchor="middle" fontSize="13"
-fontWeight="700" fill="#81c784" fontFamily="Oswald,sans-serif">O</text>;
-if(f===-1)return<text key={s} x={SX[s]} y={29} textAnchor="middle" fontSize="13"
-fontWeight="700" fill="#ef5350" fontFamily="Oswald,sans-serif">✕</text>;
-return null;
-})}
-{baseFret===1
-?<rect x={SX[0]-4} y={33} width={SX[5]-SX[0]+8} height={5} rx="2" fill="#e8e8f0"/>
-:<line x1={SX[0]-4} y1={NUT_Y} x2={SX[5]+4} y2={NUT_Y} stroke="#4a4a60" strokeWidth="1.5"/>
+  const { stringGap, fretGap, dotR: R, marginTop: mT } = FB;
+  const ROWS = 5; // visible fret rows in the static diagram
+  const x0 = fbStringX(0), x1 = fbStringX(5);
+  const used = chord.frets.filter(f => f > 0);
+  const maxFret = used.length ? Math.max(...used) : 1;
+  const minFret = used.length ? Math.min(...used) : 1;
+  // Start at the nut when the chord fits in the first ROWS frets,
+  // otherwise shift up and label the top fret (e.g. G#m at fret 4).
+  const baseFret = maxFret <= ROWS ? 1 : minFret;
+  const dotY = f => mT + (f - baseFret + 0.5) * fretGap;
+  const fretLineY = i => mT + i * fretGap;
+
+  const barreFret = chord.barre
+    ? (chord.frets.find((f, s) => chord.fingers[s] === 1 && f > 0) ?? null)
+    : null;
+  const barreStr = (chord.barre && barreFret !== null)
+    ? chord.frets.reduce((a, f, s) => { if (chord.fingers[s] === 1 && f === barreFret) a.push(s); return a; }, [])
+    : [];
+  const hasBarre = barreStr.length >= 2;
+  const bx1 = hasBarre ? fbStringX(barreStr[0]) : 0;
+  const bx2 = hasBarre ? fbStringX(barreStr[barreStr.length - 1]) : 0;
+  const bcy = barreFret !== null ? dotY(barreFret) : 0;
+
+  const W = fbBoardW;
+  const H = mT + ROWS * fretGap + 26;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: W, height: "auto" }}
+      role="img" aria-label={`${chord.name} chord diagram`}>
+      {/* string name labels */}
+      {STRING_LABELS.map((l, s) => (
+        <text key={`l${s}`} x={fbStringX(s)} y={18} textAnchor="middle" fontSize="15"
+          fontWeight="600" fill="#8888aa" fontFamily="Oswald,sans-serif">{l}</text>
+      ))}
+      {/* open (O) / muted (X) markers above the nut */}
+      {chord.frets.map((f, s) => {
+        if (f === 0) return <text key={`o${s}`} x={fbStringX(s)} y={mT - 14} textAnchor="middle"
+          fontSize="18" fontWeight="700" fill="#81c784" fontFamily="Oswald,sans-serif">O</text>;
+        if (f === -1) return <text key={`x${s}`} x={fbStringX(s)} y={mT - 14} textAnchor="middle"
+          fontSize="18" fontWeight="700" fill="#ef5350" fontFamily="Oswald,sans-serif">✕</text>;
+        return null;
+      })}
+      {/* nut (thick) at fret 1, otherwise a thin top line + fret number */}
+      {baseFret === 1
+        ? <rect x={x0 - 5} y={mT - 4} width={x1 - x0 + 10} height={6} rx="2" fill="#e8e8f0" />
+        : <line x1={x0 - 5} y1={mT} x2={x1 + 5} y2={mT} stroke="#4a4a60" strokeWidth="2" />}
+      {baseFret > 1 && <text x={x0 - 16} y={dotY(baseFret) + 5} textAnchor="end" fontSize="14"
+        fill="#8888aa" fontFamily="Oswald,sans-serif">{baseFret}fr</text>}
+      {/* horizontal fret lines */}
+      {[1, 2, 3, 4, 5].map(i => (
+        <line key={`f${i}`} x1={x0 - 5} y1={fretLineY(i)} x2={x1 + 5} y2={fretLineY(i)}
+          stroke="#2a2a40" strokeWidth="2" />
+      ))}
+      {/* vertical strings */}
+      {STRING_LABELS.map((_, s) => (
+        <line key={`s${s}`} x1={fbStringX(s)} y1={mT} x2={fbStringX(s)} y2={fretLineY(ROWS)}
+          stroke="#3a3a52" strokeWidth="2" />
+      ))}
+      {/* barre bar */}
+      {hasBarre && (
+        <rect x={bx1 - R} y={bcy - R} width={bx2 - bx1 + 2 * R} height={2 * R} rx={R}
+          fill="#e8e8f0" opacity="0.95" />
+      )}
+      {hasBarre && (
+        <text x={(bx1 + bx2) / 2} y={bcy + 6} textAnchor="middle" fontSize="17"
+          fontWeight="700" fill="#0a0a0f" fontFamily="Oswald,sans-serif">1</text>
+      )}
+      {/* finger dots with numbers */}
+      {chord.frets.map((f, s) => {
+        if (f <= 0) return null;
+        if (chord.barre && chord.fingers[s] === 1 && f === barreFret) return null;
+        const cy = dotY(f);
+        return (
+          <g key={`d${s}`}>
+            <circle cx={fbStringX(s)} cy={cy} r={R} fill="#e8e8f0" />
+            {chord.fingers[s] > 0 && (
+              <text x={fbStringX(s)} y={cy + 6} textAnchor="middle" fontSize="17"
+                fontWeight="700" fill="#0a0a0f" fontFamily="Oswald,sans-serif">{chord.fingers[s]}</text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
 }
-{baseFret>1&&<text x={SX[0]-10} y={bcy+4} textAnchor="end" fontSize="10"
-fill="#8888aa" fontFamily="Oswald,sans-serif">{baseFret}fr</text>}
-{[1,2,3,4,5].map(i=>(
-<line key={i} x1={SX[0]-4} y1={NUT_Y+i*FRET_H} x2={SX[5]+4} y2={NUT_Y+i*FRET_H}
-stroke="#2a2a40" strokeWidth="1.5"/>
-))}
-{SX.map((x,s)=>(
-<line key={s} x1={x} y1={NUT_Y} x2={x} y2={NUT_Y+5*FRET_H}
-stroke="#2a2a40" strokeWidth="1.5"/>
-))}
-{chord.barre&&barreStr.length>=2&&(
-<rect x={bx1-R} y={bcy-R} width={bx2-bx1+2*R} height={2*R} rx={R}
-fill="#e8e8f0" opacity="0.92"/>
-)}
-{chord.barre&&barreStr.length>=2&&(
-<text x={(bx1+bx2)/2} y={bcy+4} textAnchor="middle" fontSize="12"
-fontWeight="700" fill="#0a0a0f" fontFamily="Oswald,sans-serif">1</text>
-)}
-{chord.frets.map((f,s)=>{
-if(f<=0)return null;
-if(chord.barre&&chord.fingers[s]===1)return null;
-const cy=dotY(f);
-return(
-<g key={s}>
-<circle cx={SX[s]} cy={cy} r={R} fill="#e8e8f0"/>
-<text x={SX[s]} y={cy+4} textAnchor="middle" fontSize="12"
-fontWeight="700" fill="#0a0a0f" fontFamily="Oswald,sans-serif">{chord.fingers[s]}</text>
-</g>
-);
-})}
-</svg>
-);
+
+// ============================================================
+// INTERACTIVE QUIZ FRETBOARD
+// Same orientation/geometry as ChordDiagram. Shows all 6 strings as
+// vertical lines and frets 1–7 as horizontal lines. Each string/fret
+// intersection is tappable; a filled gold dot appears when tapped.
+// ============================================================
+function InteractiveFretboard({ tapped, onTap, disabled }) {
+  const { stringGap, fretGap, dotR: R, marginTop: mT } = FB;
+  const FRETS = 7;
+  const x0 = fbStringX(0), x1 = fbStringX(5);
+  const dotY = f => mT + (f - 0.5) * fretGap;
+  const fretLineY = i => mT + i * fretGap;
+  const W = fbBoardW;
+  const H = mT + FRETS * fretGap + 20;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: W, height: "auto", touchAction: "manipulation" }}>
+      {/* string name labels */}
+      {STRING_LABELS.map((l, s) => (
+        <text key={`l${s}`} x={fbStringX(s)} y={18} textAnchor="middle" fontSize="15"
+          fontWeight="600" fill="#8888aa" fontFamily="Oswald,sans-serif">{l}</text>
+      ))}
+      {/* nut at the top */}
+      <rect x={x0 - 5} y={mT - 4} width={x1 - x0 + 10} height={6} rx="2" fill="#e8e8f0" />
+      {/* horizontal fret lines + fret numbers on the left */}
+      {[1, 2, 3, 4, 5, 6, 7].map(i => (
+        <line key={`f${i}`} x1={x0 - 5} y1={fretLineY(i)} x2={x1 + 5} y2={fretLineY(i)}
+          stroke="#2a2a40" strokeWidth="2" />
+      ))}
+      {[1, 2, 3, 4, 5, 6, 7].map(f => (
+        <text key={`fn${f}`} x={x0 - 18} y={dotY(f) + 5} textAnchor="end" fontSize="13"
+          fill="#8888aa" fontFamily="Oswald,sans-serif">{f}</text>
+      ))}
+      {/* vertical strings */}
+      {STRING_LABELS.map((_, s) => (
+        <line key={`s${s}`} x1={fbStringX(s)} y1={mT} x2={fbStringX(s)} y2={fretLineY(FRETS)}
+          stroke="#3a3a52" strokeWidth="2" />
+      ))}
+      {/* tappable intersections */}
+      {[1, 2, 3, 4, 5, 6, 7].flatMap(f => [0, 1, 2, 3, 4, 5].map(s => {
+        const key = `${s}-${f}`;
+        const on = tapped.includes(key);
+        const cy = dotY(f);
+        return (
+          <g key={key} onClick={() => !disabled && onTap(s, f)}
+            style={{ cursor: disabled ? "default" : "pointer" }}>
+            <rect x={fbStringX(s) - stringGap / 2} y={cy - fretGap / 2}
+              width={stringGap} height={fretGap} fill="transparent" />
+            {on && <circle cx={fbStringX(s)} cy={cy} r={R} fill="#f0c040" />}
+          </g>
+        );
+      }))}
+    </svg>
+  );
 }
 
 // ============================================================
@@ -1322,20 +1420,8 @@ return <div key={i} className={c}/>;
 )}
 {cdPhase==="quiz"?(
 <>
-<div className="cd-grid">
-<div className="cd-hdr"/>
-{["E","A","D","G","B","e"].map(l=><div key={l} className="cd-hdr">{l}</div>)}
-{[1,2,3,4,5,6,7].flatMap(fret=>[
-<div key={`fr${fret}`} className="cd-fret-lbl">{fret}</div>,
-...[0,1,2,3,4,5].map(str=>{
-const key=`${str}-${fret}`;
-const tapped=cdTapped.includes(key);
-return(
-<button key={key} className={`cd-cell${tapped?" tapped":""}`}
-onClick={()=>handleCdTap(str,fret)}/>
-);
-})
-])}
+<div className="cd-fretboard-wrap">
+<InteractiveFretboard tapped={cdTapped} onTap={handleCdTap}/>
 </div>
 <div className="cd-btn-row">
 <button className="primary-btn" onClick={handleCdCheck}>Check Answer</button>
