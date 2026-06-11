@@ -1,6 +1,31 @@
 # Music Practice App — Change Log
 
 ---
+## 2026-06-11 — Phase 6 Fix: Chord Diagram Orientation and Marker Corrections
+
+### What Was Changed
+- `src/App.jsx` — three corrections to Julia's guitar chord diagrams, applied to BOTH the static `ChordDiagram` (shown on reveal) and the `InteractiveFretboard` (tappable input board), which share one geometry block.
+- **Fix 1 — marker position:** fret position dots now sit between the **D and G strings** (the two middle strings, indices 2 & 3) instead of between G and B. `fbMarkerY = (fbStringY(2)+fbStringY(3))/2`.
+- **Fix 2 — fret 7 marker:** fret 7 is now a **single** dot like frets 3 and 5 (double dots only occur at fret 12, outside the 7-fret window). `FretMarkers` no longer special-cases fret 7.
+- **Fix 3 — horizontal orientation:** the whole board was rotated to how you hold a guitar — **nut on the LEFT**, strings run **horizontally** (top→bottom E · A · D · G · B · e), frets run **vertically**. O/X open/muted markers now sit to the **left of the nut**; the `{n}fr` position number appears **above** the board when a chord starts above fret 1; the interactive board's fret numbers (1–7) moved from the left to **above** each fret column. Barre chords now draw as a **vertical** bar spanning the barred strings. Finger dots keep the same size (r=17 / 34px) and style.
+- Bumped `FB.marginTop` 30→40 and pinned the fret-number / position-label baseline to y=17 so the `{n}fr` label clears the rounded top of a barre bar (was overlapping on G#m).
+
+### What Was Added
+- Reworked geometry helpers: `fbStringY(s)` (string row Y), `fbNutX` (nut X), `fbBoardH` (fixed board height); `FB` now uses `marginTop` / `marginLeft` (nut X) / `marginRight` / `marginBottom`. Each component defines `dotX(f)` / `fretLineX(i)` (was `dotY` / `fretLineY`).
+- `FretMarkers` now takes a `dotX` prop and draws one cream/pearl (`#f0ead6`, opacity 0.55) circle per fret.
+
+### Known Issues or Limitations
+- The tap-key format (`"string-fret"`, string 0–5, fret 1–7) and all quiz/scoring handlers (`handleCdTap`, `handleCdCheck`, Show Me, Skip) are unchanged — only the SVG layout was rotated, so the quiz flow is untouched.
+- The static diagram still only draws position markers that fall inside its visible 5-fret window (so a nut-position chord shows dots at 3 and 5, not 7) — correct neck behavior.
+- The horizontal board is wider than tall; on a narrow phone it scales uniformly to fit the screen width, so finger dots render at ~30px there rather than the full 34px. Proportions are preserved and taps remain accurate.
+
+### Manual Steps Required
+- None. Verified locally in a 375×812 mobile viewport (logged in as Julia): the interactive board and the Asus2 reveal show the nut on the left, E→e top to bottom, O/X left of the nut, single markers between D and G at frets 3/5/7; tapping still scores correctly ("✓ Nailed it!"); and the G#m reveal shows the vertical barre bar with a clearly legible `4fr` label above it. `npm run build` passes; no console errors.
+
+### Next Phase
+- Phase 7: Full teacher mode audit — confirm all student sections visible
+
+---
 ## 2026-06-11 — Phase 6: Fret Markers on Julia's Chord Diagrams
 
 ### What Was Changed
