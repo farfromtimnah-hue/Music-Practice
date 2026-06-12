@@ -828,7 +828,7 @@ const bassNoteX = f => (f === 0 ? bassNutX - 28 : bassNutX + (f - 0.5) * BG.fret
 const bassBoardW = bassNutX + BASS_FRETS * BG.fretGap + BG.marginRight;
 const bassBoardH = BG.marginTop + 3 * BG.stringGap + BG.marginBottom;
 
-function BassFretboard({ glowString = null, glowCell = null, greenCell = null, redCell = null, onTap = null }) {
+function BassFretboard({ glowString = null, glowCell = null, greenCell = null, redCell = null, onTap = null, showLabels = false }) {
   const boardTop = bassStringY(0) - 18;
   const boardBot = bassStringY(3) + 18;
   const boardLeft = bassNutX;
@@ -887,13 +887,19 @@ function BassFretboard({ glowString = null, glowCell = null, greenCell = null, r
         );
       })}
 
-      {/* note labels at every string/fret intersection */}
+      {/* note labels at every string/fret intersection.
+          When showLabels is false (during a question) the names are hidden so
+          they can't be used as a cheat sheet. A highlighted cell (glow/green/red)
+          still draws its marker — but its name only appears once labels reveal,
+          so "Name That Note" shows WHERE the note is, not WHAT it is. */}
       {BASS_STRINGS.flatMap((st, s) =>
         st.notes.map((note, f) => {
           const x = bassNoteX(f), y = bassStringY(s);
           const isGreen = cellEq(greenCell, { s, fret: f });
           const isRed = cellEq(redCell, { s, fret: f });
           const isGlow = cellEq(glowCell, { s, fret: f });
+          const isSpecial = isGreen || isRed || isGlow;
+          if (!showLabels && !isSpecial) return null;
           let bg = "rgba(20,12,6,0.80)", fg = "#f3ecdd", stroke = "rgba(240,234,214,0.28)";
           if (isGreen) { bg = "#2e7d32"; fg = "#eaffea"; stroke = "#81c784"; }
           else if (isRed) { bg = "#c62828"; fg = "#ffecec"; stroke = "#ef5350"; }
@@ -902,8 +908,10 @@ function BassFretboard({ glowString = null, glowCell = null, greenCell = null, r
           return (
             <g key={`n${s}-${f}`}>
               <circle cx={x} cy={y} r={r} fill={bg} stroke={stroke} strokeWidth="1.2" />
-              <text x={x} y={y + 4} textAnchor="middle" fontSize={note.length > 1 ? "12" : "13"}
-                fontWeight="700" fontFamily="Oswald,sans-serif" fill={fg}>{note}</text>
+              {showLabels && (
+                <text x={x} y={y + 4} textAnchor="middle" fontSize={note.length > 1 ? "12" : "13"}
+                  fontWeight="700" fontFamily="Oswald,sans-serif" fill={fg}>{note}</text>
+              )}
             </g>
           );
         })
@@ -1692,8 +1700,30 @@ if (screen==="bassModeSelect") return (
 🔤 Name That Note
 <span className="card-btn-sub">What note is this fret?</span>
 </button>
+<button className="card-btn" onClick={()=>setScreen("bassStudy")}>
+📖 Study
+<span className="card-btn-sub">See the whole neck with every note name</span>
+</button>
 </div>
 <button className="ghost-btn" style={{maxWidth:320}} onClick={goHome}>← Back</button>
+</div></>
+);
+
+// BASS STUDY (reference view — all note labels visible, no quiz)
+if (screen==="bassStudy") return (
+<><style>{S}</style>
+<div className="shell">
+<div className="cd-screen">
+<div className="g-header">
+<button style={{background:"none",border:"none",color:"var(--muted)",fontSize:14,cursor:"pointer",fontFamily:"'Source Sans 3',sans-serif"}} onClick={()=>setScreen("bassModeSelect")}>← Back</button>
+<div style={{fontSize:11,color:"var(--muted)",letterSpacing:2,textTransform:"uppercase"}}>Study</div>
+</div>
+<div className="cd-chord-name" style={{fontSize:28}}>Bass Fretboard</div>
+<div className="cd-sub">Every note — low E on top, high G on bottom</div>
+<div className="cd-fretboard-wrap"><BassFretboard showLabels={true}/></div>
+<div className="cd-sub" style={{color:"var(--muted)"}}>Study the neck, then go quiz yourself.</div>
+<button className="primary-btn" onClick={()=>setScreen("bassModeSelect")}>← Back to Modes</button>
+</div>
 </div></>
 );
 
@@ -1716,12 +1746,13 @@ return (
 <div className="cd-sub">{modeLabel}</div>
 <div className="q-card"><div className="q-text" style={{textAlign:"center"}}>{bassStep.question}</div></div>
 <div className="cd-fretboard-wrap">
-{bassMode==="string"&&<BassFretboard glowString={bassStep.stringIdx}/>}
-{bassMode==="name"&&<BassFretboard glowCell={{s:bassStep.stringIdx,fret:bassStep.fret}}/>}
+{bassMode==="string"&&<BassFretboard glowString={bassStep.stringIdx} showLabels={bassAnswered}/>}
+{bassMode==="name"&&<BassFretboard glowCell={{s:bassStep.stringIdx,fret:bassStep.fret}} showLabels={bassAnswered}/>}
 {isFind&&<BassFretboard
 onTap={bassAnswered?null:handleBassTap}
 greenCell={bassAnswered?{s:bassStep.stringIdx,fret:bassStep.fret}:null}
-redCell={bassAnswered&&bassTap&&!(bassTap.s===bassStep.stringIdx&&bassTap.fret===bassStep.fret)?bassTap:null}/>}
+redCell={bassAnswered&&bassTap&&!(bassTap.s===bassStep.stringIdx&&bassTap.fret===bassStep.fret)?bassTap:null}
+showLabels={bassAnswered}/>}
 </div>
 {!isFind&&(
 <div className="ans-list">

@@ -1,6 +1,31 @@
 # Music Practice App — Change Log
 
 ---
+## 2026-06-12 — Phase 5 Fix: Bass Note Labels Hidden During Quiz
+
+### What Was Changed
+- `src/App.jsx` — `BassFretboard` now takes a `showLabels` prop (default `false`). The note-label layer only renders a cell's text when `showLabels` is true. During a question the names are hidden so they can't be used as a cheat sheet; a highlighted cell (glow/green/red) still draws its **marker** but **not its name**, so "Name That Note" reveals WHERE the note is, not WHAT it is.
+- The three quiz fretboards now pass `showLabels={bassAnswered}` — labels are hidden while the question is open and revealed as feedback after the student answers (or taps, in Find the Note):
+  - **String Names:** only the highlighted string glows; all note + open-string names hidden. After answering, the string name is revealed (feedback text "Yes! 🎸" / "Not quite — it's X") and the full board labels reveal.
+  - **Find the Note:** all labels hidden; student taps from memory. After tapping, every label reveals with the correct fret green and any wrong tap red.
+  - **Name That Note:** all labels hidden; only the highlighted intersection shows as a gold marker (no name). After answering, all labels reveal.
+- Untouched (per the brief): visual styling, string order (E·A·D·G top→bottom), inlay fret markers (still at frets 3/5/7), fret-number landmarks, and every non-bass part of the app. Fret numbers and inlay dots are navigation aids, not note names, so they remain visible in every mode.
+
+### What Was Added
+- **Study (reference) mode:** a new "📖 Study" card on the bass mode-select screen and a new `bassStudy` screen. It renders `<BassFretboard showLabels={true}/>` — the full neck with every note name visible, no quiz, no glow — plus a header back arrow and a "← Back to Modes" button that both return to the mode-select screen.
+- `showLabels` prop on `BassFretboard` (additive; default `false`).
+
+### Known Issues or Limitations
+- After answering in String Names, the whole board's labels reveal (not just the one string's name). This is intentional reinforcement and still satisfies "reveal the string name as part of the feedback"; the feedback line also names the string.
+- Fret-position numbers (0–7) and inlay dots stay visible during questions by design — they aid navigation but never reveal a note's name, so they aren't a cheat.
+
+### Manual Steps Required
+- None. Verified locally in a 390×844 mobile viewport (logged in as Bernardo): in all three modes the SVG shows 0 note labels during the question (String Names shows only the glowing string; Name That Note shows only a gold position dot with no name); after answering all 32 labels reveal with correct/incorrect coloring and the right feedback. Study mode shows all 32 labels with a working back button. `npm run build` passes; no console errors.
+
+### Next Phase
+- Phase 7: Full teacher mode audit — confirm all student sections visible
+
+---
 ## 2026-06-11 — Phase 6 Fix: Chord Diagram Orientation and Marker Corrections
 
 ### What Was Changed
