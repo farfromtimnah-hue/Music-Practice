@@ -1,6 +1,29 @@
 # Music Practice App — Change Log
 
 ---
+## 2026-07-05 — Rich Voicings Piano Studio (teacher-only section)
+
+### What Was Added
+A new **teacher-only** section, **🎹 Rich Voicings Piano Studio**, reachable from the Teacher Home screen (`screen==="richVoicings"`, guarded by `isTeacher`). It is a piano practice app for a player who knows theory/notes cold but hasn't drilled piano technique: it serves **pre-voiced, rich pop-gospel progressions** and shows exactly which keys to play with each hand so the user can apply rich voicings (7ths, add9, sus, slash bass) in a worship setting. Self-paced reference & practice — not a timed play-along. Sibling to the Cut Capo and Open Voicings studios.
+
+- **Two difficulty levels** (toggle, changeable anytime): **Foundations** — clean 7ths + add9, no slash chords or secondary dominants (3 progressions); **Pop Gospel** — 7ths + add9/sus + slash-bass movement + one secondary-dominant lift (4 progressions).
+- **Curated, transposable voicing library** — voicings are **hand-authored in the key of C** (to preserve smooth voice-leading) and transposed to the chosen key by a pure semitone shift. We never algorithmically stack intervals. If the upward shift would exceed 6 semitones we transpose **down** instead (e.g. G: +7 → −5) to keep voicings in a comfortable worship register.
+- **Two-hand blue/yellow keyboard** — a horizontal piano keyboard lights **LH notes blue** and **RH notes yellow**, with the note name printed on each lit key. Chord chip row (Nashville numbers underneath), tap-to-jump, prominent current-chord symbol, Prev/Next chord, and "New progression" to cycle the level's set. Per-hand note readout below.
+- **Worship-weighted key selection** — manual picker (all 12 keys) plus a "🎲 Surprise me" button weighted 3× toward worship keys (C, G, D, A, E, F, Bb).
+- **Thin device-only persistence** — last-used key + level saved to `localStorage` (no syncing promised).
+
+### Keyboard range (design note)
+Rather than a fixed C2–C6 window, the keyboard range is computed **per progression** from every note the progression actually uses (across all its chords, in the current key), padded a couple semitones and snapped to white keys, then **fit to the screen width**. This guarantees both hands are always visible at once (bass sits ~octave 2, treble ~octave 4–5, ~3+ octaves apart) and that no bass note ever falls off the low end after a downward transposition (e.g. key G pushes some LH notes to G1, below C2). Legible on mobile (verified at 375px).
+
+### Files
+- `src/pianovoicings/library.js` — the curated voicing data (Foundations F1–F3, Pop Gospel P1–P4, authored in C) plus the pitch engine: SPN↔MIDI, enharmonic-aware note spelling (flat keys spell flats, sharp keys sharps), 12-key table with per-key accidental preference, offset/transpose helpers, and the worship-weighted `surpriseKey()`.
+- `src/pianovoicings/RichVoicingsStudio.jsx` — the two-hand piano keyboard SVG (whites + overlaid blacks, per-progression fit-to-width range, blue LH / yellow RH lit keys with note labels) and the full UI (level toggle, key picker + Surprise me, chord chip row with Nashville numbers, Prev/Next, New progression, per-hand readout). Self-contained styles (`rv-` prefix) reusing the app's CSS variables.
+- `src/App.jsx` — additive only: import + a `richVoicings` screen route + a "🎹 Rich Voicings Piano Studio" button on Teacher Home. No existing section touched.
+
+### Manual Steps Required
+- None. Verified in-browser (teacher login, PIN 9999): Foundations/C F1 → Cmaj7 lights LH C2 blue + RH E4·G4·B4 yellow; Pop Gospel/C P1 → G7sus4 lights LH G2 + RH F4·G4·C5; Pop Gospel/G P2 → transposes down (offset −5) with the descending bass (C·B·A→D) preserved and both hands in view; P4/C → E7 lights the G# black key (secondary-dominant color note); level toggle swaps the progression set. `npm run build` passes; no console errors; keyboard legible at mobile 375px. Cut Capo Studio, Open Voicings Studio, and student sections unaffected.
+
+---
 ## 2026-07-05 — Open Voicings Studio (teacher-only section)
 
 ### What Was Added

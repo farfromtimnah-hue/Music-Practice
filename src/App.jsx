@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import CutCapoStudio from "./cutcapo/CutCapoStudio.jsx";
 import OpenVoicingsStudio from "./openvoicings/OpenVoicingsStudio.jsx";
+import RichVoicingsStudio from "./pianovoicings/RichVoicingsStudio.jsx";
 
 // ============================================================
 // TEACHER PIN
@@ -1354,6 +1355,12 @@ if (screen==="openVoicings") {
   return (<><style>{S}</style><OpenVoicingsStudio onBack={()=>setScreen("teacherHome")}/></>);
 }
 
+// RICH VOICINGS PIANO STUDIO — teacher only (pop-gospel two-hand voicings)
+if (screen==="richVoicings") {
+  if (!isTeacher) { setScreen("teacherHome"); return null; }
+  return (<><style>{S}</style><RichVoicingsStudio onBack={()=>setScreen("teacherHome")}/></>);
+}
+
 if (screen==="teacherHome") return (
 <><style>{S}</style>
 <div className="shell">
@@ -1391,6 +1398,7 @@ Tap a key on the circle to lock it for students.<br/>
 <button className="ghost-btn" onClick={()=>setScreen("bassModeSelect")}>🎸 Bass Fretboard</button>
 <button className="teacher-btn" onClick={()=>setScreen("cutCapo")}>🎼 Cut Capo Studio</button>
 <button className="teacher-btn" onClick={()=>setScreen("openVoicings")}>✨ Open Voicings Studio</button>
+<button className="teacher-btn" onClick={()=>setScreen("richVoicings")}>🎹 Rich Voicings Piano Studio</button>
 <button className="teacher-btn" onClick={()=>setScreen("settings")}>⚙️ View Students</button>
 </div>
 <TeacherNav active="circle"/>
