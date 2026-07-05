@@ -1,6 +1,30 @@
 # Music Practice App — Change Log
 
 ---
+## 2026-07-05 — Open Voicings Studio (teacher-only section)
+
+### What Was Added
+A new **teacher-only** section, **✨ Open Voicings Studio**, reachable from the Teacher Home screen (`screen==="openVoicings"`, guarded by `isTeacher`). It is a sibling to Cut Capo Studio but models a guitar in **standard tuning with NO capo** (open strings **E A D G B E**, low E on top). Its whole purpose is **open-string voicings**: shapes where one or more open strings ring against a few fretted notes — often high up the neck with two or three fingers — for a shimmery, non-traditional sound. It **only ever shows voicings that ring open and never a barre**. Two modes (tabs):
+- **Chord Library** — root + type + optional slash-bass pickers and a free-text search box (`Gm`, `A7`, `Cmaj7`, `D/F#`, `F#m7b5` all parse). Generates open voicings, ranks them (bass correctness → most open/ringing strings → fewest fretted fingers → smaller span → mild bonus for higher-up shapes) and renders the top 3 with a voicing selector, plus a "N open strings ringing" line. When no clean open voicing exists it shows the honest message **"No clean open voicing in standard tuning — this chord needs a barre."** — never a barre fallback.
+- **Discover** — a 12 roots × 8 common-types grid of best open-voicing thumbnails; chords with no open voicing are greyed with a "needs barre" tag (honest and still visible), plus a "🎲 Surprise me" button that opens a random chord that HAS an open voicing.
+
+### THE OPEN FILTER (voicing.js)
+Every returned voicing must pass ALL hard rules: **≥1 open string sounding**; **no barres** (reject if 2+ *fretted* strings share a fret); **≤3 fretted strings**; **fretted span ≤4**; **≥3 sounding strings**; all required chord tones present (optional tones droppable); no pitch classes outside the chord (guaranteed by candidate construction); and if a slash bass is given, the lowest sounding string must be that pitch class. A full-neck (frets 0–12) enumeration is used so discovery shapes at the 5th/7th/9th fret are found. A 11,296-voicing sweep across the Discover grid confirmed **0 invariant violations** (every shown voicing rings open and has no barre).
+
+### Files
+- `src/openvoicings/tuning.js` — standard-tuning pitch engine (no capo). Exports open pitches per string and `noteAtFret(s, fret)`, plus MIDI/available-fret helpers. Low E on top, frets 0–12 all available.
+- `src/openvoicings/chords.js` — thin re-export of the Cut Capo chord engine (chord formulas, search parsing, naming) — chord theory is tuning-independent, so it is reused rather than duplicated.
+- `src/openvoicings/voicing.js` — the open-voicing generator + ranking + the hard OPEN FILTER above. Returns an empty list (→ honest message) when no open voicing exists; no barre fallback.
+- `src/openvoicings/OpenVoicingsStudio.jsx` — the photorealistic horizontal fretboard (low E on top, nut left, frets 0–12, wood/frets/nut, inlays 3·5·7·9 single & 12 double, **no capo graphic**, bold ○ for ringing open strings / ✕ for muted) and the two-mode UI. Self-contained styles (`ov-` prefix) reusing the app's CSS variables.
+- `src/App.jsx` — additive only: import + an `openVoicings` screen route + a "✨ Open Voicings Studio" button on Teacher Home. No existing section touched.
+
+### Note on F major
+F major does yield a thin but genuine open voicing (F fretted with an open A ringing), not the "needs barre" message, because the chord-type table marks the 5th as **optional** for `maj` — so root+third with an open string passes the filter. The hard guarantee still holds: it is a real ringing open voicing, **not** a barre. Truly barre-only chords (e.g. F#/C#/G# majors, several sus/9 shapes) correctly return the honest no-voicing message — 25 of the 96 Discover cells are greyed.
+
+### Manual Steps Required
+- None. Verified in-browser (teacher login, PIN 9999): C major → open voicing (C·G·E, 2 open strings, no barre); F#maj → honest "needs a barre" message; D/F# → lowest note F# with 2 open strings ringing; Discover shows 96 cells, 25 greyed "needs barre", "Surprise me" opened a valid Asus4; Cut Capo Studio and student sections unaffected. `npm run build` passes; no console errors.
+
+---
 ## 2026-07-05 — Cut Capo Studio (teacher-only section)
 
 ### What Was Added
