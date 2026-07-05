@@ -1,6 +1,29 @@
 # Music Practice App — Change Log
 
 ---
+## 2026-07-05 — Cut Capo Studio (teacher-only section)
+
+### What Was Added
+A new **teacher-only** section, **🎼 Cut Capo Studio**, reachable from the Teacher Home screen (`screen==="cutCapo"`, guarded by `isTeacher`). It models a guitar in standard tuning with a **partial ("cut") capo clamped at fret 2 over ONLY the A, D and G strings** (low E, B, high E left open). Open-strummed this sounds **E B E A B E**. One app, three modes (tabs):
+- **Chord Library** — root + type + optional slash-bass pickers and a free-text search box (`Gm`, `A7`, `E/G#`, `Bb`, `F#m7b5` all parse). Computes every playable voicing in the capo setup, ranks them (bass note → open/ringing strings → fewer fretted strings → smaller span → no full barre) and renders the top 3 on the fretboard with a voicing selector. Honestly labels omitted tones / partial shapes.
+- **Discover** — a 12 roots × 8 common-types grid of best-voicing thumbnails, tap-to-open with alternates, plus a "🎲 Surprise me" button.
+- **Builder** — reverse tool: tap frets string-by-string (note name printed on every available position), ○ open / ✕ mute per string, live low→high note readout, auto-naming with alternates + slash detection, manual label, Save/Clear, and a "My Shapes" list. Saved to `localStorage` (honest "Saved on this device only — not synced yet." note).
+
+### Files
+- `src/cutcapo/tuning.js` — partial-capo pitch engine. Exports open pitches per string, `isCapoed(s)`, `noteAtFret(s, fret)` (respects "no frets 0–1 on capoed strings"), plus MIDI/available-fret helpers. Uses the physically correct rule (fret = one semitone), which the brief also states in prose.
+- `src/cutcapo/chords.js` — chord-type formulas (required vs droppable tones), search parsing, and reverse auto-naming.
+- `src/cutcapo/voicing.js` — voicing generator + ranking, with an honest partial fallback when no complete shape exists.
+- `src/cutcapo/shapeStore.js` — thin `getShapes()/saveShape()/deleteShape()` store on `localStorage`; interface is Firebase-swappable behind the same three functions (no backend added now).
+- `src/cutcapo/CutCapoStudio.jsx` — the photorealistic horizontal fretboard (low E on top, nut left, frets 0–12, wood/frets/nut, inlays 3·5·7·9 single & 12 double, partial-capo bar clamping only the A/D/G rows at fret 2) and the three-mode UI. Self-contained styles reusing the app's CSS variables.
+- `src/App.jsx` — additive only: import + a `cutCapo` screen route + a "🎼 Cut Capo Studio" button on Teacher Home. No existing section touched.
+
+### Note on the brief's example note-table
+The prose rule ("each semitone above a string's open pitch adds 1") is implemented as-is and matches a real guitar. Two cells of the brief's *example* table (and acceptance-check #6's D-string value) were hand-computed two semitones high on the D and G rows — e.g. D string / fret 4 physically sounds **F#**, not G#. The engine follows the physically correct rule so voicings match the actual instrument.
+
+### Manual Steps Required
+- None. Verified in-browser (teacher login, PIN 9999): E major → wide-open ringing voicing (E B E B G#); Gm/Cm playable; A7 = A C# E G; E/G# lowest note G#; Builder A-string fret 3 → C and D-string fret 4 → F#; Discover renders 96 thumbnails. `npm run build` passes, no console errors, existing sections unaffected.
+
+---
 ## 2026-06-12 — Phase 5 Fix: Bass Note Labels Hidden During Quiz
 
 ### What Was Changed

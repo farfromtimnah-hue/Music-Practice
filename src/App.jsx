@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import CutCapoStudio from "./cutcapo/CutCapoStudio.jsx";
 
 // ============================================================
 // TEACHER PIN
@@ -1340,6 +1341,12 @@ return (
 );
 }
 
+// CUT CAPO STUDIO — teacher only (Chord Library · Discover · Builder)
+if (screen==="cutCapo") {
+  if (!isTeacher) { setScreen("teacherHome"); return null; }
+  return (<><style>{S}</style><CutCapoStudio onBack={()=>setScreen("teacherHome")}/></>);
+}
+
 if (screen==="teacherHome") return (
 <><style>{S}</style>
 <div className="shell">
@@ -1375,6 +1382,7 @@ Tap a key on the circle to lock it for students.<br/>
 <button className="ghost-btn" onClick={()=>setScreen("ptModeSelect")}>🇧🇷 Notas em Português</button>
 <button className="ghost-btn" onClick={startChordQuiz}>🎸 Chord Diagrams</button>
 <button className="ghost-btn" onClick={()=>setScreen("bassModeSelect")}>🎸 Bass Fretboard</button>
+<button className="teacher-btn" onClick={()=>setScreen("cutCapo")}>🎼 Cut Capo Studio</button>
 <button className="teacher-btn" onClick={()=>setScreen("settings")}>⚙️ View Students</button>
 </div>
 <TeacherNav active="circle"/>
