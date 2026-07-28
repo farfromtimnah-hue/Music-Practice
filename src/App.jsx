@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import CutCapoStudio from "./cutcapo/CutCapoStudio.jsx";
 import OpenVoicingsStudio from "./openvoicings/OpenVoicingsStudio.jsx";
 import RichVoicingsStudio from "./pianovoicings/RichVoicingsStudio.jsx";
+import KeyboardStudio from "./keyboard/KeyboardStudio.jsx";
 
 // ============================================================
 // TEACHER PIN
@@ -14,7 +15,7 @@ const TEACHER_PIN = "9999";
 const STUDENTS = {
   Bernardo: { pin: "2847", instrument: "bass" },
   Julia:    { pin: "5913", instrument: "guitar" },
-  Samuel:   { pin: "7361", instrument: "keys" },
+  Lara:     { pin: "4321", instrument: "keys" },
 };
 
 // ============================================================
@@ -1361,6 +1362,17 @@ if (screen==="richVoicings") {
   return (<><style>{S}</style><RichVoicingsStudio onBack={()=>setScreen("teacherHome")}/></>);
 }
 
+// KEYBOARD STUDIO — piano/keys students (Lara) and Teacher
+if (screen==="keyboardStudio") {
+  if (!isTeacher && studentInstrument!=="keys") { setScreen("home"); return null; }
+  return (<><style>{S}</style>
+    <KeyboardStudio
+      onBack={()=>setScreen(isTeacher?"teacherHome":"home")}
+      onLog={(a)=>logActivity(studentName||"teacher",a)}
+    />
+  </>);
+}
+
 if (screen==="teacherHome") return (
 <><style>{S}</style>
 <div className="shell">
@@ -1396,6 +1408,7 @@ Tap a key on the circle to lock it for students.<br/>
 <button className="ghost-btn" onClick={()=>setScreen("ptModeSelect")}>🇧🇷 Notas em Português</button>
 <button className="ghost-btn" onClick={startChordQuiz}>🎸 Chord Diagrams</button>
 <button className="ghost-btn" onClick={()=>setScreen("bassModeSelect")}>🎸 Bass Fretboard</button>
+<button className="ghost-btn" onClick={()=>setScreen("keyboardStudio")}>🎹 Keyboard Studio</button>
 <button className="teacher-btn" onClick={()=>setScreen("cutCapo")}>🎼 Cut Capo Studio</button>
 <button className="teacher-btn" onClick={()=>setScreen("openVoicings")}>✨ Open Voicings Studio</button>
 <button className="teacher-btn" onClick={()=>setScreen("richVoicings")}>🎹 Rich Voicings Piano Studio</button>
@@ -1891,6 +1904,7 @@ return (
 <button className="ghost-btn" onClick={()=>setScreen("ptModeSelect")}>🇧🇷 Notas em Português</button>
 {studentInstrument==="guitar"&&<button className="ghost-btn" onClick={startChordQuiz}>🎸 Chord Diagrams</button>}
 {studentInstrument==="bass"&&<button className="ghost-btn" onClick={()=>setScreen("bassModeSelect")}>🎸 Bass Fretboard</button>}
+{studentInstrument==="keys"&&<button className="ghost-btn" onClick={()=>setScreen("keyboardStudio")}>🎹 Keyboard Studio</button>}
 <button className="ghost-btn" onClick={()=>setScreen("stylePick")}>Change Learning Style</button>
 </div>
 <StudentNav active="circle"/>

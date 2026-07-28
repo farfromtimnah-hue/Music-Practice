@@ -1,6 +1,98 @@
 # Music Practice App — Change Log
 
 ---
+## 2026-07-28 — Roster swap (Samuel → Lara) + Keyboard Studio
+
+### Task 1 — Replaced Samuel with Lara
+- `STUDENTS` in `src/App.jsx`: `Samuel { pin:"7361", instrument:"keys" }` removed, replaced by
+  `Lara { pin:"4321", instrument:"keys" }`. Samuel no longer appears anywhere in the app.
+- PIN login logic, the teacher settings screen structure, `TEACHER_PIN`, and the `c5Log`
+  localStorage key were **not** touched — only roster data and section assignment.
+- Lara's assigned sections: Circle of 5ths Quiz, Portuguese Note Names Quiz, and the new
+  Keyboard Studio. She does not see the guitar or bass sections.
+
+### Task 2 — New section: 🎹 Keyboard Studio
+New files: `src/keyboard/theory.js` (data) and `src/keyboard/KeyboardStudio.jsx` (UI).
+Wired into `App.jsx` as `screen==="keyboardStudio"`, guarded by
+`isTeacher || studentInstrument==="keys"` — visible to **Lara** and **Teacher (9999)** only.
+Entry buttons added to both the student home (keys students) and the Teacher Home screen.
+
+**Core principle: the answer is never handed over up front.** This is a quiz that ends in a
+reference diagram. The keyboard does not render until every gate is passed.
+
+**Mode A — Scales.** All 15 major keys as separate entries (C G D A E B F# C# F Bb Eb Ab Db Gb Cb).
+- Gate 1 — sharp side / flat side. C major instead asks "How many sharps or flats does C major
+  have?" and accepts 0; C then goes straight to the reveal (1 gate, not 3) rather than showing a
+  broken sharp/flat question.
+- Gate 2 — "How many sharps?" / "How many flats?", wording follows the Gate 1 answer. Buttons 0–7.
+- Gate 3 — "Which ones?" multi-select. **All twelve** possible accidentals of that type are shown
+  as chips (F# C# G# D# A# E# B# / Bb Eb Ab Db Gb Cb Fb) so the set cannot be guessed by
+  elimination. Exact-set match required, then Check.
+- Reveal — top-down keyboard with the scale lit in order, fingering numbers on the keys, plus a
+  note/finger table. **LH / RH toggle**, defaulting to right hand, clearly labelled.
+
+**Mode B — Chords.** Major, minor, diminished and dominant 7 on all 12 chromatic roots (48 chords).
+- Gate — "Which notes are in this chord?" multi-select over 12 chromatic chips in the spelling
+  appropriate to the chord (flat chords get flat chips, sharp chords sharp chips; exotic spellings
+  such as Cb/Fb are appended so every chord tone is actually offered).
+- Reveal — chord tones lit with RH fingering: **1 3 5** for triads, **1 2 3 5** for dominant 7.
+
+**"Show Me" at every gate** — reveals the correct answer, advances, and is never counted wrong.
+Matches the established pattern used by the Chord Diagram Trainer. The reveal bar reads
+"Revealed" instead of "✓ Solved" when Show Me was used at any gate.
+
+**Usage logging** goes to the existing `c5Log` key via the existing `logActivity()` helper
+(`keyboard_scale_start`, `keyboard_scale_complete`, `keyboard_chord_start`,
+`keyboard_chord_complete`, each carrying a `shown` flag). The key was not renamed.
+
+### The keyboard graphic
+Pure inline SVG — no external images, image URLs, or CDN assets.
+- **Straight-down orthographic view.** No perspective, no vanishing point, no key sides visible.
+- Realistic rendering: layered ivory gradients on the white keys, seam shading down each white
+  key's right edge, glossy black keys with a gloss band and a soft drop shadow onto the whites,
+  rounded edges, a felt strip along the back of the case.
+- **Real black-key geometry.** Black-key centres are set in white-key units from the left edge of
+  C: C#=0.90, D#=2.10, F#=3.85, G#=5.00, A#=6.15 — i.e. they are *not* evenly centred on the
+  cracks. In the 2-group C#/D# lean outward; in the 3-group only G# sits on its boundary while F#
+  and A# lean out. Every black key still straddles its seam. Black keys are 61% of white-key
+  length and 60% of white-key width.
+- Two full octaves plus the closing C (25 white-key positions), so any one-octave scale plus its
+  octave note always fits. `placeAscending()` normalises every root down into the first octave, so
+  a high-rooted scale (Bb, B, Cb, C#) starts at the left instead of crowding the right edge.
+- Lit keys use a gold gradient plus a glow rather than a flat colour fill, so they still read as
+  keys. Fingering numbers are large; on black keys they are cream-on-dark for contrast.
+- Responsive: the SVG scales to container width with a `viewBox`, and a `max-width:400px`
+  breakpoint shrinks the type for phones.
+
+### Musical accuracy — verified, not assumed
+Both data tables were checked programmatically before shipping, not eyeballed:
+- **All 15 scales** — verified that the ascending interval pattern is exactly 0 2 4 5 7 9 11 12
+  **and** that the letter names run as seven consecutive letters (so Cb major spells
+  Cb Db Eb Fb Gb Ab Bb Cb, and C# major spells C# D# E# F# G# A# B# C#).
+- **All 48 chords** — verified against root-relative interval sets: major 0 4 7, minor 0 3 7,
+  diminished 0 3 6, dominant 7 0 4 7 10. (Spot checks from the brief: G = G B D, Gm = G Bb D,
+  Gdim = G Bb Db, G7 = G B D F — all correct.)
+- **All 30 fingerings** (15 RH + 15 LH) — compared string-for-string against the patterns supplied
+  in the brief, including the enharmonic rules (F# takes Gb's, C# takes Db's, Cb takes B's).
+- Every scale and chord was also range-checked to confirm it lands on real keys inside the
+  rendered two-octave span.
+- The reveal was additionally server-rendered to static SVG and inspected as an image for C, Eb,
+  B, Gb, Cb, C#, Bb, G7 and Bb dim to confirm the right keys light with the right numbers.
+
+### Notes / limitations
+- **Diminished spellings avoid double-flats — flag this for review.** Strict theory spells a
+  diminished triad as root + minor 3rd + diminished 5th *by letter*, which for some roots requires
+  a double flat: Dbdim would be Db Fb Abb, Ebdim would be Eb Gb Bbb, Abdim would be Ab Cb Ebb,
+  Gbdim would be Gb Bbb Dbb. The app instead uses the common practical/teaching spellings that
+  keep every note a single accidental: Db E G, Eb Gb A, Ab B D, Gb A C. Every chord is the
+  correct *sound* (verified as intervals 0-3-6 in all 12 cases), and the plain roots are spelled
+  strictly correctly (Cdim = C Eb Gb, Fdim = F Ab Cb, Bbdim = Bb Db Fb, Bdim = B D F). If the
+  strict double-flat spellings are wanted for teaching, they are a one-line change per root in
+  the `CHORDS` table in `src/keyboard/theory.js`.
+- Chord fingering is root position only, as specified. No inversions.
+- Scales are one octave ascending only; no descending fingering is shown.
+
+---
 ## 2026-07-05 — Rich Voicings Piano Studio (teacher-only section)
 
 ### What Was Added
