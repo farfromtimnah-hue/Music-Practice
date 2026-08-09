@@ -1,6 +1,149 @@
 # Music Practice App — Change Log
 
 ---
+## 2026-08-09 — Instrument Tuner (guitar + bass, two mic modes)
+
+### What Was Added
+A new **🎯 Tuner** section for the students who play a stringed instrument. It listens through
+the microphone, works out which string is being played, and tells the student in plain words
+which way to turn the peg. Reachable from the student home (guitar/bass only) and from Teacher
+Home (`screen==="tuner"`).
+
+**Visibility is gated on the existing `instrument` field, never on student names**
+(`!isTeacher && studentInstrument==="keys"` bounces back to home):
+- **Bernardo** (bass) — yes, defaults to 4-string bass
+- **Julia** (guitar) — yes, defaults to guitar
+- **Lara** (keys) — **no**, the section does not appear for her at all
+- **Teacher** — yes, including the experimental mode and the diagnostic
+
+No new field was added for tuner defaults. The `STUDENTS` object, PIN logic, the `c5Log`
+localStorage key, the teacher settings screen, and every existing quiz/studio/fretboard were
+left untouched — all Tuner work is additive.
+
+### File structure added
+- `src/tuner/pitch.js` — the single detection implementation, the tuning tables, cents
+  conversion, and string auto-detect.
+- `src/tuner/audio.js` — mic capture and the reference tone. **All the difference between the
+  two modes lives here**, so the detection maths stays identical between them.
+- `src/tuner/Headstock.jsx` — the three SVG headstocks.
+- `src/tuner/Tuner.jsx` — the UI, the two mode cycles, the readout, and the teacher diagnostic.
+- `src/tuner/tunerStyles.js` — self-contained `tn-` prefixed CSS reusing the app's variables.
+- `src/App.jsx` — additive only: import, a `tuner` screen route, and two entry buttons.
+
+### Detection algorithm and buffer size
+**YIN** (cumulative mean normalized difference + absolute threshold + parabolic interpolation),
+not plain autocorrelation: plain autocorrelation octave-errors badly on low, harmonically rich
+notes, which is exactly the B0/E1 bass region this has to get right.
+
+**Buffer: 8192 samples.** The brief's 4096 floor is enough to contain two periods of 28 Hz
+(1714 samples each at 48 kHz) but leaves the CMND curve noisy right where B0 lives. 8192 gives
+~4.8 periods of 28 Hz (~170 ms) and is where the low-end readings actually settle. That latency
+is a deliberate trade — the brief prefers low-frequency stability over fast response.
+
+Three things had to be added beyond textbook YIN, each for a concrete failure found in testing:
+1. **Zero-phase low-pass (2-pole, 1200 Hz)** before the period search. For any signal *above*
+   the range, every integer multiple of its true period is also a perfect period match, so a
+   500 Hz tone produced a flawless lag minimum at 250 Hz — inside our window, so the final range
+   check never fired and the tuner confidently reported a note nobody played. Corner placement
+   is a real trade: a 4-pole filter at 400 Hz fixed the leak but ate guitar high E's harmonics
+   and dragged it flat, so the gentler filter plus check (3) is what works.
+2. **Fundamental-presence check** (Goertzel at the candidate frequency vs. partials 2–4). A
+   phantom sub-harmonic scores clarity **1.0000** — identical to a real note — so confidence
+   alone cannot reject it. A real fundamental has energy at its own frequency; a phantom has
+   almost none. Checking partials 2–4 rather than just the octave is required because an 800 Hz
+   tone puts its phantom at the *third* sub-harmonic.
+3. **Clarity gate at 0.86** and a silence gate on the raw (unfiltered) RMS, so filtering can
+   never manufacture "silence" out of a real signal.
+
+Verified against synthetic plucked tones before shipping: all 11 targets detect within **0.4
+cents** at both 44.1 kHz and 48 kHz, no octave errors even when the fundamental is much weaker
+than its harmonics, and silence / white noise / out-of-range tones all correctly return null.
+~9 ms per frame.
+
+### How the two modes differ in code
+They share `detectPitch()`, the headstock, the readout, and every threshold. The difference is
+confined to mic handling:
+
+- **Mode A — Pause Cycle** (default, students and teacher). `CONSTRAINTS_PAUSE` requests the mic
+  with echo cancellation **off** (the mic never hears our tone, and AEC is a nonlinear process
+  that could only hurt a signal we measure to a few cents). The cycle runs
+  listen → tone (mic muted) → settle → listen, so the student hears target-note / their-note
+  alternating. The mic is gated at a **GainNode**, not by stopping the track: re-acquiring a
+  MediaStreamTrack is slow enough to make the cycle feel jarring and can re-prompt for
+  permission on iOS.
+- **Mode B — Continuous (experimental, teacher only).** `CONSTRAINTS_CONTINUOUS` requests
+  `echoCancellation: true` with `noiseSuppression: false` and `autoGainControl: false`. Both of
+  those are speech-tuned: suppression treats a sustained low tone as stationary noise and gates
+  it away, and AGC smears amplitude. The tone runs unbroken and the mic is never muted.
+  Switching modes tears down and re-acquires the stream, because echo cancellation is a property
+  of the captured track and cannot be toggled after the fact.
+
+Mode B is rendered only inside the `isTeacher` block, so it is not reachable from any student
+view. Alongside it, the **teacher diagnostic** shows detected frequency, clarity, whether
+detection is currently succeeding or failing, and whether the mic is open or muted — all live,
+so a student's phone can be checked with the reference tone running.
+
+### Other details
+- **Reference tone** is a fundamental plus four quiet partials (2nd, 3rd as triangle, 4th, 6th),
+  not a pure sine — a bare sine at 30–100 Hz is very hard to pitch-match and most phone speakers
+  barely reproduce it, whereas overtones let a small speaker imply a fundamental it cannot
+  physically produce. Gentle 50 ms attack / 180 ms release, peak gain 0.22.
+- **Auto-detect refuses to guess** beyond 150 cents, showing "Not sure which string — pick one
+  below". A wrong guess would send a student to tighten the wrong peg, which is worse than no
+  guess. Tapping a string locks to it and overrides auto-detect until tapped again.
+- **In tune = within 5 cents**, shown as a green centred needle, green cents value, and a green
+  "✓ In Tune" panel.
+- **Tighten/loosen** is the most prominent element of the readout, in its own bordered panel
+  (too low = tighten, too high = loosen).
+- **Mic permission** is requested only when the Tuner screen opens, never on app load, and every
+  track is stopped plus the AudioContext closed on the way out. Denial, no-device, and
+  unsupported-browser are handled with distinct messages and a Try Again button.
+- Reference pitch is fixed at A440; there is deliberately no adjustable reference control.
+
+### Musical accuracy — verified by rendering, not eyeballed
+All three headstocks were server-rendered to PNG and inspected as images, which caught two
+mapping errors that reading the code did not:
+- **Guitar 3+3** — low E takes the bass-side post *furthest from the nut*, giving the symmetric
+  E·A·D / G·B·e fan of a real headstock.
+- **Bass 5-string 4+1** — the low B sits alone on the treble side.
+- Nut slots are assigned **per side**, not low→high across the nut. Spacing them naively dragged
+  the 5-string's low B diagonally across all four other strings; strings now never cross, as on
+  a real instrument.
+
+### Device / browser limitations discovered
+- **`npm run build` and `npm run dev` do not run on this machine.** The installed esbuild native
+  binary (vite 4.4) hangs indefinitely under the local Node v26.5.0 — even `esbuild --version`
+  never returns. This is pre-existing and unrelated to the Tuner. To verify this work the app
+  was bundled with **rollup + @babel/preset-react** instead and driven in a real browser; every
+  Tuner file plus `App.jsx` also passes a Babel parse check. **The tuner has not been verified
+  through the project's own vite build** — that needs a working toolchain (a Node version
+  matching the lockfile, or `npm install` to refresh esbuild).
+- Chrome's `--use-file-for-fake-audio-capture` was silently ignored when
+  `--use-fake-device-for-media-stream` was also passed (the built-in beep won), and even alone
+  it attenuates the file by roughly 50 dB — far below any sane silence gate. End-to-end testing
+  therefore injected a synthetic plucked string by overriding `getUserMedia`, which exercises
+  the real AnalyserNode → `detectPitch` → auto-detect → readout path.
+- Mode B's usefulness is genuinely unknown until it is tried on real student devices — browser
+  echo cancellation is tuned for speech and may well destroy a 30–100 Hz tone. That is the
+  point of the mode, and the diagnostic exists to measure it.
+
+### Verified
+In-browser against the bundled real app (390×844 mobile viewport), no console errors:
+Julia → guitar, E2/G3/B3 auto-detect with exact cents and correct Tighten/Loosen; a pitch
+halfway between two strings shows the "not sure" refusal; Bernardo → defaults to 4-string bass
+(E1 A1 D2 G2) and sees no teacher block or Continuous mode; 5-string B0 at 30.87 Hz reads exact
+and holds −18.0 cents steady when detuned; Lara → **no Tuner button anywhere**; Teacher → both
+modes, the experimental warning, and a live diagnostic reading "succeeding" at clarity 1.000.
+Leaving the tuner unmounts it and releases the stream.
+
+### Left unresolved
+- The vite build could not be exercised here (see above) — worth running once the toolchain is
+  fixed, before relying on the deploy.
+- Mode B on real hardware is untested by definition; that is the experiment.
+- The tuner shows guitar/bass tunings only. A keys student has no use for it, hence the gate.
+- Tuning targets are the verified values from the brief, entered as given and not recomputed.
+
+---
 ## 2026-07-28 — Roster swap (Samuel → Lara) + Keyboard Studio
 
 ### Task 1 — Replaced Samuel with Lara
