@@ -40,6 +40,10 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
   const [diag, setDiag] = useState({ frequency: null, clarity: null, ok: false });
 
   const audioRef = useRef(null);
+  // Set true once the tuner is torn down. getUserMedia is async, so a stream
+  // can resolve AFTER unmount; without this flag that stream has no owner and
+  // the mic stays live until a page refresh.
+  const deadRef = useRef(false);
   const rafRef = useRef(0);
   const lastGoodRef = useRef(0);
   const cycleRef = useRef(null);
@@ -111,11 +115,16 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
       // we ask for. Mode B needs echo cancellation because the tone and
       // the mic overlap; Mode A never hears its own tone.
       await audio.start(micMode === "continuous" ? CONSTRAINTS_CONTINUOUS : CONSTRAINTS_PAUSE);
+      // The user may have hit Back while getUserMedia was still resolving.
+      // Nothing owns this stream now, so release it here or the mic light
+      // stays on until the page is refreshed.
+      if (deadRef.current) { audio.stop(); return; }
       audioRef.current = audio;
       setStatus("running");
       rafRef.current = requestAnimationFrame(loop);
     } catch (err) {
       audio.stop();
+      if (deadRef.current) return;
       setErrorReason(err.reason || "unsupported");
       setStatus("error");
     }
@@ -134,8 +143,9 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
   /* Mic is requested when the tuner opens, and released on the way out —
      never held open in the background. */
   useEffect(() => {
+    deadRef.current = false;
     startAudio();
-    return () => stopAudio();
+    return () => { deadRef.current = true; stopAudio(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
