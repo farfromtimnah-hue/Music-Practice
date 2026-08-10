@@ -708,3 +708,84 @@ On the two basses the G string — outermost slot, post nearest the nut, so the
 shortest vertical run with the widest sideways reach — still curves a little
 more than its neighbours near the nut. It crosses nothing and reads as a
 string; softening it further bowed the E string instead, so it was left alone.
+
+---
+
+## Headstock artwork port — photoreal SVGs into the component
+
+Replaced the procedurally-drawn artwork in `src/tuner/Headstock.jsx` with the
+three finished SVGs from `design-output/Headstocks.dc.html` (guitar 3+3, bass
+4-in-line, bass 4+1). `design-output/` has been deleted now that its contents
+are in the component.
+
+### What changed in the component
+- The old geometry helpers (`LAYOUTS`, `nutXs()`, `stringPath()`, `guitarPath()`,
+  `bassPath()`, `NUT_EDGE`) are gone. The artwork is now literal inline SVG per
+  instrument rather than computed from a peg table, so the layered faces, wood
+  grain, cast shadows, wound-string texture and back-mounted tuner buttons all
+  come across as drawn.
+- Props, export shape and call signature are unchanged: still a default export
+  taking `{ tuningId, strings, activeIndex, onSelect }`, so `Tuner.jsx` renders
+  it exactly as before.
+- The design file's `{{ hl.<id>.c / .o / .t }}` template placeholders became an
+  `hl(i, activeIndex)` helper returning ring colour, ring opacity and label
+  colour. The design harness's six-way `pegState` enum collapsed to the single
+  active colour (`#ffb020`), which is all the app distinguishes.
+- All 15 peg ids preserved and individually addressable — `peg-E2 … peg-E4`,
+  `peg-E1-4 … peg-G2-4`, `peg-B0 … peg-G2-5` — each still carrying `data-peg`,
+  the `onSelect` click target and its own visible note label.
+- `.tn-peg-label` is no longer used: the new artwork carries its own inlaid
+  labels (dark drop copy under a tinted top copy). The rule is still in
+  `tunerStyles.js` and now has no effect.
+
+### Guitar treble-side peg order — fixed while porting
+The design file had the treble column running E4 / B3 / G3 from tip to nut, so
+the high E sat furthest from the nut. Corrected to G3 / B3 / E4 tip→nut, which
+puts the high E nearest the nut opposite D3. Walking low→high now goes down the
+bass side E2 A2 D3, across, then back up the treble side G3 B3 E4. Only the two
+post y values swapped (310 ↔ 120); B3 stayed at 215, and the bass side and both
+basses were not touched.
+
+The three treble strings were re-routed to their moved posts, and the note
+labels moved with them.
+
+**Nut slots deliberately did NOT move.** The treble post column leans *outboard*
+as it descends toward the nut (x = 182, 194, 204), so the post nearest the nut
+is also the one furthest out and must be fed by the outermost nut slot. Of the
+six ways to assign the three slots to the three posts, exactly one avoids
+crossings, and it is the one the artwork already had: G3←159, B3←178, E4←197.
+The instinct to also swap the slots (mirroring the post swap) produces four
+crossings — checked before it reached the render.
+
+### Verification
+Rendered from the real component via `react-dom/server`, rasterised full-frame
+at 300×552 (nut and fretboard visible at the bottom, nothing cropped) and
+inspected, plus a 4× zoom on the guitar's treble side:
+- Guitar treble reads G3 top, B3 middle, E4 bottom
+- No string crosses another on any of the three. Verified numerically against
+  the *painted* polylines including stroke width, not just centrelines — the
+  tightest clearance is A2/D3 at 0.12 units, which is inherited unchanged from
+  the approved artwork
+- Every label sits on its own peg. The guitar's treble labels were nudged
+  inboard so they clear the 14.5-unit highlight ring; at the design file's
+  original offsets the active E4 ring overlapped its own label
+- Highlighting confirmed on guitar E4, guitar G3, bass4 E1 and bass5 G2: gold
+  ring on the peg and the note label turns gold
+- String order low→high holds: guitar E2 A2 D3 G3 B3 E4, bass4 E1 A1 D2 G2,
+  bass5 B0 E1 A1 D2 G2
+
+Inline SVG only, no external images, no new dependencies.
+
+### Note on `npm run build`
+Not run to completion here: `vite build` dies with "The service was stopped"
+because the sandboxed environment kills the `esbuild` binary. Confirmed
+pre-existing by stashing the change and reproducing the identical failure on
+the unmodified committed file — it is not caused by this port. The component
+was verified through the React server-render path instead, which exercises the
+real component code.
+
+### Carried over from the design pass
+The 4+1's lone treble-side post takes **G2**, not B0. B0 is the lowest string
+and sits at the bass-side edge of the nut, so routing it to a treble-side post
+would cross all four other strings; "B0 on the lone post" and "no crossings"
+cannot both hold. Note order B0 E1 A1 D2 G2 is unchanged.
