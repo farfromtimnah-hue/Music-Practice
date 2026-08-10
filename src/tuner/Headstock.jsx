@@ -44,108 +44,214 @@
 
 const LAYOUTS = {
   guitar: {
+    kind: "guitar",
     width: 300,
     height: 420,
-    // 3+3. Bass side x=70, treble side x=230.
-    // Low E furthest from the nut on the bass side (smallest y = tip).
+    postR: 11,        // guitar posts are modest next to the head
+    buttonRx: 12,
+    buttonRy: 8.5,
+    shaft: 30,
+    stringW: [2.6, 2.3, 2.0, 1.6, 1.3, 1.1],  // low -> high, wound to plain
+    wound: 3,         // the lowest 3 are wound
+    // 3+3. Posts sit INSIDE the wood: the head is ~0.13..0.87 wide here, so
+    // x=96/204 leaves a clear margin of wood outboard of every post.
     pegs: [
-      { x: 70, y: 96, side: "left", nutOffset: 0 },   // E2  furthest from nut
-      { x: 70, y: 168, side: "left", nutOffset: 1 },  // A2
-      { x: 70, y: 240, side: "left", nutOffset: 2 },  // D3  nearest nut
-      { x: 230, y: 240, side: "right", nutOffset: 2 },// G3  nearest nut
-      { x: 230, y: 168, side: "right", nutOffset: 1 },// B3
-      { x: 230, y: 96, side: "right", nutOffset: 0 }, // E4  furthest from nut
+      { x: 96, y: 104, side: "left" },   // E2  furthest from nut
+      { x: 96, y: 176, side: "left" },   // A2
+      { x: 96, y: 248, side: "left" },   // D3  nearest nut
+      { x: 204, y: 248, side: "right" }, // G3  nearest nut
+      { x: 204, y: 176, side: "right" }, // B3
+      { x: 204, y: 104, side: "right" }, // E4  furthest from nut
     ],
   },
   bass4: {
+    kind: "bass",
     width: 300,
-    height: 460,
-    // 4-in-line, all posts on the bass side. E furthest from the nut.
+    height: 470,
+    postR: 19,        // bass posts are MUCH larger relative to the head
+    buttonRx: 17,
+    buttonRy: 12,
+    shaft: 34,
+    stringW: [5.4, 4.5, 3.7, 3.0],
+    wound: 4,         // all four bass strings read as wound
+    // 4-in-line, all posts on the bass side, mounted well inside the wood
+    // with head extending on BOTH sides of every post.
     pegs: [
-      { x: 84, y: 92, side: "left", nutOffset: 0 },   // E1 furthest
-      { x: 84, y: 176, side: "left", nutOffset: 1 },  // A1
-      { x: 84, y: 260, side: "left", nutOffset: 2 },  // D2
-      { x: 84, y: 344, side: "left", nutOffset: 3 },  // G2 nearest nut
+      { x: 140, y: 108, side: "left" },  // E1 furthest
+      { x: 140, y: 196, side: "left" },  // A1
+      { x: 140, y: 284, side: "left" },  // D2
+      { x: 140, y: 352, side: "left" },  // G2 nearest nut
     ],
   },
   bass5: {
-    width: 300,
-    height: 460,
-    // 4+1. Low B alone on the treble side, furthest from the nut.
+    kind: "bass",
+    width: 320,
+    height: 470,
+    postR: 19,
+    buttonRx: 17,
+    buttonRy: 12,
+    shaft: 34,
+    stringW: [6.2, 5.4, 4.5, 3.7, 3.0],
+    wound: 5,
+    // 4+1. Low B alone on the treble side. It sits NEAREST the nut on that
+    // side so its short lateral hop peels off the treble edge of the string
+    // band without ever reaching across the other four.
     pegs: [
-      { x: 226, y: 92, side: "right", nutOffset: 0 }, // B0 lone, treble side
-      { x: 84, y: 92, side: "left", nutOffset: 0 },   // E1
-      { x: 84, y: 176, side: "left", nutOffset: 1 },  // A1
-      { x: 84, y: 260, side: "left", nutOffset: 2 },  // D2
-      { x: 84, y: 344, side: "left", nutOffset: 3 },  // G2 nearest nut
+      { x: 212, y: 150, side: "right" }, // B0 lone, treble side
+      { x: 128, y: 108, side: "left" },  // E1
+      { x: 128, y: 196, side: "left" },  // A1
+      { x: 128, y: 284, side: "left" },  // D2
+      { x: 128, y: 352, side: "left" },  // G2 nearest nut
     ],
   },
 };
 
 /* Where each string crosses the nut.
 
-   Strings are evenly spaced across the nut, but the ORDER matters and is
-   not simply low->high left->right. A string must never cross another on
-   its way from the nut to its post, so the string whose post is on the
-   left edge has to leave the nut on the left, and vice versa.
+   On a real instrument the nut span and the post span are SIMILAR widths,
+   which is exactly why the strings look near-vertical and near-parallel:
+   each one runs straight up the head and only makes a short lateral hop at
+   the very end to meet its post. A narrow nut cluster feeding wide-set
+   posts would produce a dramatic fan, which no real headstock has.
 
-   Concretely: on a 4+1 bass the low B's post is alone on the RIGHT, so B
-   is the RIGHTMOST string at the nut. Spacing them naively low->high
-   would drag the B diagonally across all four other strings — which is
-   both ugly and physically wrong.
+   Order matters as well as spacing. A string must never cross another, so
+   the nut slots must be in the same left-to-right order as the posts they
+   feed. Sorting the strings by post x and handing out slots in that order
+   guarantees no crossings: two strings can only cross if their nut order
+   and their post order disagree.
 
-   So: lay the slots out left->right, give the left-side pegs the leftmost
-   slots (nearest-the-tip peg gets the outermost slot, matching how the
-   fan opens up), and give the right-side pegs the rightmost slots. */
-function nutXs(pegs, width) {
+   For a same-side group the posts share one x, so post x alone does not
+   order them. Ties break by y — the peg FURTHEST from the nut (smallest y)
+   takes the slot furthest out toward that side's edge, so its longer run
+   stays outboard of the shorter ones and they never touch. */
+function nutXs(pegs, width, nutSpan, nutHalf) {
   const count = pegs.length;
-  // The string group is centred on the neck and spans a fixed share of
-  // the nut, independent of layout, so a 4-in-line bass spreads its
-  // strings evenly across the nut instead of bunching them to one side.
-  const span = width * 0.30;
-  const left = (width - span) / 2;
+  if (count === 0) return [];
+
+  // Nut span is a large share of the neck width, close to the post span, so
+  // the strings stay near-vertical instead of fanning.
+  const span = nutSpan;
+  // Centre the band on the neck, then lean it toward the posts. On a
+  // 4-in-line every post sits on one side, so a strictly centred band leaves
+  // the outer strings reaching sideways into a hook. Leaning the band toward
+  // the post column — which is what the neck actually does on such a bass —
+  // keeps every run near-vertical. Clamped so the band always stays on the
+  // nut, and a symmetric layout (3+3) is unaffected because its posts
+  // average out to the centreline.
+  const postMid = pegs.reduce((a, p) => a + p.x, 0) / count;
+  const half = span / 2;
+  // The band may lean at most as far as the nut's own half-width allows,
+  // so it never runs off the end of the nut.
+  const limit = Math.max(0, nutHalf - half);
+  const lean = Math.max(-limit, Math.min(limit, (postMid - width / 2) * 0.55));
+  const left = width / 2 + lean - half;
   const slot = (k) => (count === 1 ? left + span / 2 : left + (span * k) / (count - 1));
 
-  const leftPegs = [];
-  const rightPegs = [];
-  pegs.forEach((p, i) => (p.side === "left" ? leftPegs : rightPegs).push(i));
-
-  // Within each side, the peg furthest from the nut (smallest y) takes the
-  // slot furthest out toward that side's edge.
-  leftPegs.sort((a, b) => pegs[a].y - pegs[b].y);
-  rightPegs.sort((a, b) => pegs[a].y - pegs[b].y);
+  // Sort string indices into the left-to-right order their posts sit in.
+  const order = pegs.map((_, i) => i).sort((a, b) => {
+    const pa = pegs[a];
+    const pb = pegs[b];
+    if (pa.x !== pb.x) return pa.x - pb.x;
+    // Same post column: outermost slot goes to the peg furthest from the nut.
+    return pa.side === "left" ? pa.y - pb.y : pb.y - pa.y;
+  });
 
   const xs = new Array(count);
-  leftPegs.forEach((idx, k) => { xs[idx] = slot(k); });
-  rightPegs.forEach((idx, k) => { xs[idx] = slot(count - 1 - k); });
+  order.forEach((idx, k) => { xs[idx] = slot(k); });
   return xs;
 }
 
-/* Outline of the headstock.
+/* The path a string takes from the nut to its post.
 
-   Shaped like a real head rather than a rounded rectangle: a broad,
-   softly-crowned tip at the top, a gentle waist about a third of the way
-   down, then a flare back out to full width where it meets the nut. */
-function headstockPath(w, h) {
-  const tip = 22;
-  const nutY = h - 44;
-  const waistY = h * 0.42;
+   Real strings do not run diagonally across the headstock. They leave the
+   nut and travel up the head essentially parallel to their neighbours,
+   then make a short lateral hop into the post right at the end. Drawing
+   that as a straight nut->post line is what produced the fan.
+
+   So: hold the nut x all the way up to `hopY`, just short of the post,
+   then curve across to the post. The hop is short and happens late, which
+   is what makes the strings read as near-vertical and near-parallel. */
+function stringPath(nx, nutTopY, peg) {
+  const dx = Math.abs(peg.x - nx);
+  const run = nutTopY - peg.y;   // vertical distance nut -> post
+  // Scale the hop to how far the string actually has to move sideways: a
+  // string nearly in line with its post barely deviates, one that must
+  // reach further gets a longer, gentler curve instead of a tight hook.
+  // Capped well short of the full run so the string still reads as vertical.
+  const hop = Math.min(run - 8, Math.max(34, dx * 2.4));
+  const startY = peg.y + hop;
   return [
-    `M ${w * 0.34} ${tip}`,
-    // left shoulder out to the widest point near the tip
-    `C ${w * 0.19} ${tip + 10}, ${w * 0.12} ${h * 0.13}, ${w * 0.115} ${h * 0.24}`,
-    // pull in to the waist
-    `C ${w * 0.11} ${h * 0.33}, ${w * 0.125} ${h * 0.37}, ${w * 0.135} ${waistY}`,
-    // flare back out toward the nut
-    `C ${w * 0.15} ${h * 0.62}, ${w * 0.155} ${h * 0.76}, ${w * 0.165} ${nutY}`,
-    `L ${w * 0.835} ${nutY}`,
-    `C ${w * 0.845} ${h * 0.76}, ${w * 0.85} ${h * 0.62}, ${w * 0.865} ${waistY}`,
-    `C ${w * 0.875} ${h * 0.37}, ${w * 0.89} ${h * 0.33}, ${w * 0.885} ${h * 0.24}`,
-    `C ${w * 0.88} ${h * 0.13}, ${w * 0.81} ${tip + 10}, ${w * 0.66} ${tip}`,
-    // crown across the tip
-    `C ${w * 0.56} ${tip - 8}, ${w * 0.44} ${tip - 8}, ${w * 0.34} ${tip}`,
+    `M ${nx} ${nutTopY}`,
+    `L ${nx} ${startY}`,
+    // Ease across into the post: leaves the straight run vertically and
+    // settles onto the post from the side, the way a string actually lies.
+    `C ${nx} ${startY - hop * 0.5}, ${peg.x} ${peg.y + hop * 0.55}, ${peg.x} ${peg.y}`,
+  ].join(" ");
+}
+
+/* Where each outline meets the nut, as a fraction of the width. The
+   outline, the neck stub, the nut itself and the string span all derive
+   from this, so they cannot drift apart. */
+const NUT_EDGE = { guitar: 0.17, bass: 0.255 };
+
+/* Outline of the headstock. Two genuinely different silhouettes.
+
+   GUITAR — the Taylor in reference/taylor-guitar-3x3.jpg: a WIDE, nearly
+   flat crown with a soft peak in the middle and distinct corners where the
+   crown meets the sides, then near-straight sides tapering gently inward
+   all the way to the nut. No dome, no waist. */
+function guitarPath(w, h) {
+  const tip = 46;
+  const nutY = h - 44;
+  // Crown corners sit wide; sides taper gently in toward the nut. The
+  // Taylor's nut is only a little narrower than its crown, so the taper is
+  // slight — a gentle inward lean, not a trapezoid.
+  // Measured off the Taylor reference: the nut is only ~14% narrower than
+  // the crown, so the taper is very gentle and the sides read near-straight.
+  const cornerX = 0.115;
+  const nutEdge = NUT_EDGE.guitar;
+  const peakY = tip - 16;      // soft central peak above the corners
+  return [
+    `M ${w * cornerX} ${tip + 10}`,
+    // crown: a short lift into the corner, then nearly flat across the
+    // middle with a soft central rise — the Taylor's signature
+    `C ${w * 0.135} ${tip - 6}, ${w * 0.30} ${peakY}, ${w * 0.5} ${peakY}`,
+    `C ${w * 0.70} ${peakY}, ${w * 0.865} ${tip - 6}, ${w * (1 - cornerX)} ${tip + 10}`,
+    // right side: hugs the crown width for a while, then leans gently in
+    `C ${w * 0.888} ${h * 0.32}, ${w * 0.862} ${h * 0.66}, ${w * (1 - nutEdge)} ${nutY}`,
+    `L ${w * nutEdge} ${nutY}`,
+    // left side back up to the crown corner
+    `C ${w * 0.138} ${h * 0.66}, ${w * 0.112} ${h * 0.32}, ${w * cornerX} ${tip + 10}`,
     "Z",
   ].join(" ");
+}
+
+/* BASS — its own shape, not the guitar reused. Following the Yamaha and
+   LTD references: an angular, swept wedge. One long straight-ish bass-side
+   edge running the full length, a clipped/angled tip, and a treble side
+   that sweeps in sharply to a narrow nut. Reads as clearly a bass. */
+function bassPath(w, h) {
+  const tip = 26;
+  const nutY = h - 44;
+  return [
+    // clipped angular tip, canted rather than domed
+    `M ${w * 0.085} ${tip + 52}`,
+    `L ${w * 0.27} ${tip}`,
+    `L ${w * 0.80} ${tip + 18}`,
+    // treble side: sweeps in from the wide tip, with a shoulder partway
+    // down, then runs down to a nut narrower than the crown
+    `C ${w * 0.885} ${h * 0.24}, ${w * 0.875} ${h * 0.40}, ${w * 0.815} ${h * 0.56}`,
+    `C ${w * 0.775} ${h * 0.70}, ${w * 0.755} ${h * 0.80}, ${w * (1 - NUT_EDGE.bass)} ${nutY}`,
+    `L ${w * NUT_EDGE.bass} ${nutY}`,
+    // bass side: long and nearly straight, a slight belly near the nut
+    `C ${w * 0.245} ${h * 0.80}, ${w * 0.15} ${h * 0.58}, ${w * 0.10} ${h * 0.40}`,
+    `C ${w * 0.08} ${h * 0.32}, ${w * 0.075} ${tip + 76}, ${w * 0.085} ${tip + 52}`,
+    "Z",
+  ].join(" ");
+}
+
+function headstockPath(w, h, kind) {
+  return kind === "bass" ? bassPath(w, h) : guitarPath(w, h);
 }
 
 export default function Headstock({
@@ -155,10 +261,21 @@ export default function Headstock({
   onSelect = null,
 }) {
   const layout = LAYOUTS[tuningId] || LAYOUTS.guitar;
-  const { width: W, height: H } = layout;
+  const { width: W, height: H, kind, postR, buttonRx, buttonRy, shaft } = layout;
   const pegs = layout.pegs.slice(0, strings.length);
   const nutY = H - 44;
-  const nutX = nutXs(pegs, W);
+  const isBass = kind === "bass";
+  // Strings span most of the nut, and the nut width follows the outline.
+  const nutEdge = isBass ? NUT_EDGE.bass : NUT_EDGE.guitar;
+  // Strings fill most of the nut. The bass nut is narrow relative to its
+  // head (see the Yamaha reference), which keeps the 4-in-line runs close
+  // to their single post column instead of reaching sideways.
+  const nutX = nutXs(
+    pegs,
+    W,
+    W * (1 - nutEdge * 2) * (isBass ? 0.58 : 0.82),
+    (W * (1 - nutEdge * 2)) / 2
+  );
   const uid = `hs-${tuningId}`;
 
   return (
@@ -223,48 +340,73 @@ export default function Headstock({
       </defs>
 
       {/* ---- headstock body ---- */}
-      <path d={headstockPath(W, H)} fill="#1a1008" opacity="0.85"
+      <path d={headstockPath(W, H, kind)} fill="#1a1008" opacity="0.85"
             transform="translate(3,4)" />
-      <path d={headstockPath(W, H)} fill={`url(#${uid}-wood)`} />
-      <path d={headstockPath(W, H)} fill={`url(#${uid}-wood)`}
+      <path d={headstockPath(W, H, kind)} fill={`url(#${uid}-wood)`} />
+      <path d={headstockPath(W, H, kind)} fill={`url(#${uid}-wood)`}
             filter={`url(#${uid}-grain)`} opacity="0.5" />
       {/* bevelled edge highlight */}
-      <path d={headstockPath(W, H)} fill="none" stroke="#c89a63"
+      <path d={headstockPath(W, H, kind)} fill="none" stroke="#c89a63"
             strokeOpacity="0.35" strokeWidth="1.5" />
 
-      {/* ---- neck stub below the nut ---- */}
-      <rect x={W * 0.19} y={nutY} width={W * 0.62} height="46"
-            fill={`url(#${uid}-wood)`} />
-      <rect x={W * 0.19} y={nutY} width={W * 0.62} height="46"
-            fill="#000" opacity="0.18" />
+      {/* ---- neck stub below the nut ----
+           Matches where the outline actually meets the nut, which differs
+           between the guitar and bass silhouettes. */}
+      {(() => {
+        const edge = nutEdge;
+        const nx = W * edge;
+        const nw = W * (1 - edge * 2);
+        return (
+          <>
+            <rect x={nx} y={nutY} width={nw} height="46"
+                  fill={`url(#${uid}-wood)`} />
+            <rect x={nx} y={nutY} width={nw} height="46"
+                  fill="#000" opacity="0.18" />
+            {/* the nut, sitting just proud of the neck on both sides */}
+            <rect x={nx - W * 0.018} y={nutY - 7} width={nw + W * 0.036}
+                  height="11" rx="2.5" fill={`url(#${uid}-nut)`} />
+            <rect x={nx - W * 0.018} y={nutY - 7} width={nw + W * 0.036}
+                  height="3.5" rx="1.5" fill="#fffdf4" opacity="0.5" />
+          </>
+        );
+      })()}
 
-      {/* ---- the nut ---- */}
-      <rect x={W * 0.17} y={nutY - 7} width={W * 0.66} height="11" rx="2.5"
-            fill={`url(#${uid}-nut)`} />
-      <rect x={W * 0.17} y={nutY - 7} width={W * 0.66} height="3.5" rx="1.5"
-            fill="#fffdf4" opacity="0.5" />
-
-      {/* ---- strings: nut -> post ---- */}
+      {/* ---- strings: nut -> post ----
+           Near-vertical up the head, with a short lateral hop into the
+           post. Width is per-string (low strings are visibly fatter) and
+           the wound ones carry a winding texture. */}
       {pegs.map((p, i) => {
         const active = i === activeIndex;
-        // Thicker strings for the low end, tapering to the high strings.
-        const w = 3.4 - (i / Math.max(1, pegs.length - 1)) * 1.9;
+        const w = layout.stringW[i] ?? 2;
+        const d = stringPath(nutX[i], nutY - 6, p);
+        const isWound = i < layout.wound;
         return (
           <g key={`s-${i}`}>
-            <line
-              x1={nutX[i]} y1={nutY - 6} x2={p.x} y2={p.y}
+            <path
+              d={d} fill="none"
               stroke="#0a0a0f" strokeOpacity="0.5"
-              strokeWidth={w + 1.6} strokeLinecap="round"
+              strokeWidth={w + 1.8} strokeLinecap="round"
             />
-            <line
-              x1={nutX[i]} y1={nutY - 6} x2={p.x} y2={p.y}
+            <path
+              d={d} fill="none"
               stroke={active ? "#ffd977" : "#c9ced8"}
               strokeWidth={w} strokeLinecap="round"
             />
-            <line
-              x1={nutX[i]} y1={nutY - 6} x2={p.x} y2={p.y}
+            {/* winding: short cross-ticks along the core, so wound strings
+                read as ribbed rather than smooth */}
+            {isWound && (
+              <path
+                d={d} fill="none"
+                stroke={active ? "#8a6a1e" : "#6f7885"}
+                strokeOpacity="0.75"
+                strokeWidth={w * 0.92}
+                strokeDasharray={`${Math.max(0.9, w * 0.32)} ${Math.max(1.5, w * 0.5)}`}
+              />
+            )}
+            <path
+              d={d} fill="none"
               stroke="#ffffff" strokeOpacity={active ? 0.7 : 0.45}
-              strokeWidth={w * 0.34} strokeLinecap="round"
+              strokeWidth={w * 0.3} strokeLinecap="round"
             />
           </g>
         );
@@ -275,7 +417,7 @@ export default function Headstock({
         const active = i === activeIndex;
         const s = strings[i];
         const outward = p.side === "left" ? -1 : 1;
-        const buttonX = p.x + outward * 34;
+        const buttonX = p.x + outward * (shaft + postR + buttonRx * 0.4);
         const clickable = typeof onSelect === "function";
         return (
           <g
@@ -286,44 +428,47 @@ export default function Headstock({
           >
             {/* glow behind the active peg */}
             {active && (
-              <circle cx={p.x} cy={p.y} r="30" fill={`url(#${uid}-glowfill)`} />
+              <circle cx={p.x} cy={p.y} r={postR * 2.4}
+                      fill={`url(#${uid}-glowfill)`} />
             )}
 
             {/* shaft from post out to the button */}
             <rect
               x={p.side === "left" ? buttonX : p.x}
-              y={p.y - 4}
-              width={34} height={8} rx="4"
+              y={p.y - postR * 0.3}
+              width={Math.abs(buttonX - p.x)} height={postR * 0.6}
+              rx={postR * 0.3}
               fill={`url(#${uid}-metal)`}
               stroke="#3b414c" strokeWidth="0.8"
             />
             {/* tuner button (the part you actually turn) */}
             <ellipse
-              cx={buttonX} cy={p.y} rx="13" ry="9"
+              cx={buttonX} cy={p.y} rx={buttonRx} ry={buttonRy}
               fill={`url(#${uid}-metal)`}
               stroke="#39404a" strokeWidth="1.2"
               filter={active ? `url(#${uid}-glow)` : undefined}
             />
-            <ellipse cx={buttonX} cy={p.y - 2.2} rx="8.5" ry="4"
+            <ellipse cx={buttonX} cy={p.y - buttonRy * 0.25}
+                     rx={buttonRx * 0.65} ry={buttonRy * 0.45}
                      fill="#ffffff" opacity="0.35" />
 
             {/* the post the string winds around */}
-            <circle cx={p.x} cy={p.y} r="13"
+            <circle cx={p.x} cy={p.y} r={postR}
                     fill="#2b3038" stroke="#171b21" strokeWidth="1" />
-            <circle cx={p.x} cy={p.y} r="10.5" fill={`url(#${uid}-post)`}
+            <circle cx={p.x} cy={p.y} r={postR * 0.81} fill={`url(#${uid}-post)`}
                     stroke={active ? "#f0c040" : "#464e5a"}
                     strokeWidth={active ? 2.4 : 1}
                     filter={active ? `url(#${uid}-glow)` : undefined} />
             {/* string winding on the post */}
-            <circle cx={p.x} cy={p.y} r="6.4" fill="none"
-                    stroke="#8e97a4" strokeWidth="1.6" opacity="0.85" />
-            <circle cx={p.x} cy={p.y} r="3.4" fill="#1d2128" />
-            <circle cx={p.x - 3} cy={p.y - 3.4} r="2.6"
-                    fill="#ffffff" opacity="0.5" />
+            <circle cx={p.x} cy={p.y} r={postR * 0.49} fill="none"
+                    stroke="#8e97a4" strokeWidth={postR * 0.13} opacity="0.85" />
+            <circle cx={p.x} cy={p.y} r={postR * 0.26} fill="#1d2128" />
+            <circle cx={p.x - postR * 0.23} cy={p.y - postR * 0.26}
+                    r={postR * 0.2} fill="#ffffff" opacity="0.5" />
 
             {/* note label, sitting outboard of the tuner button */}
             <text
-              x={buttonX + outward * 26}
+              x={buttonX + outward * (buttonRx + 14)}
               y={p.y + 6}
               textAnchor="middle"
               className={`tn-peg-label${active ? " on" : ""}`}

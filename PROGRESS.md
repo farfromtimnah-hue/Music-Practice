@@ -618,3 +618,93 @@ All 15 keys verified against standard music theory:
 
 ### Next Phase
 No next phase defined. Future work might include: per-student progress tracking, instrument-specific tips, or additional quiz question types.
+
+---
+
+## Headstock SVG geometry fix (guitar, bass4, bass5)
+
+Only `src/tuner/Headstock.jsx` was touched. Pitch detection, mic handling and
+the tuning tables were left alone.
+
+### Verification method
+Reading the code was explicitly not enough here, so each headstock was
+rendered to a full-frame PNG and inspected visually, then compared against
+photos now checked in under `reference/`:
+
+- `reference/taylor-guitar-3x3.jpg` — acoustic guitar, 3+3
+- `reference/yamaha-bass-4.jpg` — 4-string bass, 4-in-line
+- `reference/ltd-bass-5.jpg` — 5-string bass (bass peg scale, wound strings)
+
+Renders were produced by transforming the real `Headstock.jsx` with esbuild,
+running it through `react-dom/server`, and rasterising with `qlmanage`, so
+what was inspected was exactly what the component emits. Ten iterations were
+inspected before the result was accepted. The render script was temporary and
+has been removed; no project dependency was added.
+
+### What was wrong, and what the renders showed
+
+**All three — strings fanned out from a narrow nut cluster.** The nut span was
+`width * 0.30` while the posts sat far wider, and each string was a single
+straight `<line>` from nut to post. The baseline render showed a dramatic fan.
+Fixed by widening the nut span to a large share of the neck (it is now derived
+from the outline's own nut width) and by replacing the straight line with
+`stringPath()`: the string holds its nut x up the head and only makes a short
+lateral hop into the post at the very end. Renders now show near-vertical,
+near-parallel strings.
+
+**Guitar — strings crossed between nut and posts.** `nutXs()` handed the
+outermost slot to the peg furthest from the nut on *both* sides, so the treble
+G3/B3 strings crossed. Rewritten to sort strings by their post's x and hand out
+nut slots in that order, which makes crossing geometrically impossible: two
+strings can only cross if their nut order and post order disagree. Same-side
+ties break by y.
+
+**Guitar — outline was an oval dome.** Replaced with `guitarPath()` modelled on
+the Taylor photo: wide, nearly flat crown with a soft central peak, distinct
+corners, near-straight sides. Measured off the reference, the Taylor's nut is
+only ~14% narrower than its crown, so the taper is now correspondingly gentle
+(earlier attempts read as a trapezoid).
+
+**Bass 4 — posts sat on the left edge with the body entirely to their right.**
+Posts moved inward to x=140 of 300; renders confirm wood on both sides of every
+post.
+
+**Bass 5 — the low B cut a long diagonal across the head.** B0's post moved to
+the treble side nearer the nut, and with the ordered-slot rule its string now
+runs vertically down the treble side, crossing nothing. The 4+1 layout is
+unchanged.
+
+**Bass did not look different from guitar.** Now genuinely distinct:
+- `bassPath()` is its own angular swept-wedge silhouette (clipped canted tip,
+  long straight-ish bass edge, treble side sweeping in), not the guitar reused
+- bass `postR` is 19 vs the guitar's 11, so posts are clearly larger
+- per-string widths: bass 5.4→3.0 (and 6.2 for the low B) vs guitar 2.6→1.1, so
+  bass strings are clearly thicker and low is thicker than high on both
+- wound strings carry a dashed winding overlay so they read as ribbed
+
+A 4-in-line has all its posts on one side, so a strictly centred string band
+left the outer strings reaching sideways. `nutXs()` now leans the band toward
+the post column (clamped so it always stays on the nut); a symmetric 3+3 is
+unaffected because its posts average to the centreline.
+
+### Acceptance check
+1. All three rendered to PNG and inspected at full frame — yes, ten rounds
+2. No string crosses another — confirmed visually **and** analytically: each
+   path was sampled at 200 points and the left-to-right ordering of the strings
+   never changes on any of the three
+3. Strings near-vertical and near-parallel — yes
+4. Pegs mounted inside the wood on all three — yes
+5. Bass posts clearly larger than guitar posts — yes (r=19 vs r=11)
+6. Bass strings clearly thicker, low > high on each — yes
+7. Guitar outline resembles the Taylor — flat-ish crown, corners, gentle taper
+8. Bass outline visibly different from the guitar — yes
+
+Peg labels verified low→high: guitar `E2 A2 D3 G3 B3 E4`, bass4 `E1 A1 D2 G2`,
+bass5 `B0 E1 A1 D2 G2`. Each peg remains individually addressable
+(`data-peg`, `onSelect`, `activeIndex` highlight all unchanged).
+
+### Residual nit
+On the two basses the G string — outermost slot, post nearest the nut, so the
+shortest vertical run with the widest sideways reach — still curves a little
+more than its neighbours near the nut. It crosses nothing and reads as a
+string; softening it further bowed the E string instead, so it was left alone.
