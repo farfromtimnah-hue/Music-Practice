@@ -17,6 +17,8 @@ const STUDENTS = {
   Bernardo: { pin: "2847", instrument: "bass" },
   Julia:    { pin: "5913", instrument: "guitar" },
   Lara:     { pin: "4321", instrument: "keys" },
+  Manuela:  { pin: "6208", instrument: "keys" },
+  Ana:      { pin: "3175", instrument: "keys" },
 };
 
 // ============================================================
