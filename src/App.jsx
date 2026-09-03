@@ -4,6 +4,7 @@ import OpenVoicingsStudio from "./openvoicings/OpenVoicingsStudio.jsx";
 import RichVoicingsStudio from "./pianovoicings/RichVoicingsStudio.jsx";
 import KeyboardStudio from "./keyboard/KeyboardStudio.jsx";
 import Tuner from "./tuner/Tuner.jsx";
+import Songbook from "./songbook/Songbook.jsx";
 
 // ============================================================
 // TEACHER PIN
@@ -1389,6 +1390,15 @@ if (screen==="tuner") {
   </>);
 }
 
+// SONGBOOK — this week's set from Planning Center. Visible to every student and the
+// teacher (gating stays per-instrument elsewhere; none here). onKeepAlive lets an
+// open chart hold off the inactivity timeout while it is on a music stand.
+if (screen==="songbook") {
+  return (<><style>{S}</style>
+    <Songbook isTeacher={isTeacher} onKeepAlive={resetTimer} onBack={()=>setScreen(isTeacher?"teacherHome":"home")}/>
+  </>);
+}
+
 if (screen==="teacherHome") return (
 <><style>{S}</style>
 <div className="shell">
@@ -1426,6 +1436,7 @@ Tap a key on the circle to lock it for students.<br/>
 <button className="ghost-btn" onClick={()=>setScreen("bassModeSelect")}>🎸 Bass Fretboard</button>
 <button className="ghost-btn" onClick={()=>setScreen("keyboardStudio")}>🎹 Keyboard Studio</button>
 <button className="ghost-btn" onClick={()=>setScreen("tuner")}>🎯 Tuner</button>
+<button className="ghost-btn" onClick={()=>setScreen("songbook")}>🎵 Songbook</button>
 <button className="teacher-btn" onClick={()=>setScreen("cutCapo")}>🎼 Cut Capo Studio</button>
 <button className="teacher-btn" onClick={()=>setScreen("openVoicings")}>✨ Open Voicings Studio</button>
 <button className="teacher-btn" onClick={()=>setScreen("richVoicings")}>🎹 Rich Voicings Piano Studio</button>
@@ -1923,6 +1934,7 @@ return (
 {studentInstrument==="bass"&&<button className="ghost-btn" onClick={()=>setScreen("bassModeSelect")}>🎸 Bass Fretboard</button>}
 {studentInstrument==="keys"&&<button className="ghost-btn" onClick={()=>setScreen("keyboardStudio")}>🎹 Keyboard Studio</button>}
 {studentInstrument!=="keys"&&<button className="ghost-btn" onClick={()=>setScreen("tuner")}>🎯 Tuner</button>}
+<button className="ghost-btn" onClick={()=>setScreen("songbook")}>🎵 Songbook</button>
 <button className="ghost-btn" onClick={()=>setScreen("stylePick")}>Change Learning Style</button>
 </div>
 <StudentNav active="circle"/>
