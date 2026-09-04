@@ -5,7 +5,7 @@ import { matchSetItem, pickChart } from "./match.js";
 import { SERVICE_TYPES, STUDENT_SERVICE_IDS, defaultDateFor, readCachedSet, fetchSet, sameSongs } from "./setStore.js";
 import { toNashville, keyLegend, capoLabel, keyName, parseKeyName, transposedKeyName, KEY_LIST } from "./chords.js";
 import { abbreviationsFor } from "./sections.js";
-import { cutCapoVoicingsFor, normalizeCapoSetting, DEFAULT_CAPO } from "./cutcapoAdapter.js";
+import { cutCapoAnswerFor, normalizeCapoSetting, cutFretOf, MAX_FULL_CAPO } from "./cutcapoAdapter.js";
 import CutCapoDiagram from "./CutCapoDiagram.jsx";
 
 // ============================================================
@@ -72,6 +72,7 @@ const S = `
 /* capo control + cut-capo chord popup (teacher only) */
 .sb-capo{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end;margin-top:6px;}
 .sb-capo select{padding:5px 8px;font-size:13px;}
+.sb-capo-lbl{display:flex;align-items:center;gap:5px;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:#8888aa;}
 .sb-chord.tappable{cursor:pointer;}
 .sb-chord.tappable:hover{text-decoration:underline;}
 .sb-cc-hint{font-size:12px;color:#8888aa;margin:-4px 0 10px;}
@@ -120,7 +121,8 @@ function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchCha
   const [customOrder, setCustomOrder] = useState(() => lsGet("songbook_order_" + chartId, null));
   const [editing, setEditing] = useState(false);
   const [pickKey, setPickKey] = useState(false);
-  // Cut capo is Nicole's own tool: teacher only, never offered to students.
+  // { capo, cut } — a full capo and a cut capo are independent and combine.
+  // The cut capo is Nicole's own tool: teacher only, never offered to students.
   const [capo, setCapoState] = useState(() => normalizeCapoSetting(lsGet("songbook_capo_" + chartId, null)));
   const [tapped, setTapped] = useState(null); // chord token whose popup is open
   const dragRef = useRef(null);
@@ -149,23 +151,24 @@ function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchCha
   const useFull = prefs.roadmapFull || chart.abbrevCollision;
   const labelOf = (b) => b.name;
 
-  const setCapo = (next) => { const v = normalizeCapoSetting(next); setCapoState(v); lsSet("songbook_capo_" + chartId, v); if (v.mode !== "cut") setTapped(null); };
-  // Students never get cut capo, so a stale saved setting cannot leak into their view.
-  const cutCapoMode = isTeacher && capo.mode === "cut";
+  const setCapo = (next) => { const v = normalizeCapoSetting(next); setCapoState(v); lsSet("songbook_capo_" + chartId, v); if (!v.cut) setTapped(null); };
+  // A stale saved cut setting can never leak into a student's view.
+  const cutOn = isTeacher && capo.cut;
+  const cutFret = cutFretOf(capo);
 
-  // Header key label. A full capo shows the fingering key in parentheses; a cut
-  // capo deliberately does not, because it raises only three strings and does
-  // not transpose the instrument, so no single fingering key would be true.
+  // Header. The full capo shows its fingering key, because that transposition
+  // is real. The cut capo never does: it raises only three strings, so no
+  // single key describes it — it shows its derived fret instead.
   const keyHeader = () => {
     if (!key) return "Key: ?";
-    if (cutCapoMode) return "Key: " + keyName(key) + " - Cut capo";
-    if (isTeacher && capo.mode === "full") {
-      return capo.fret > 0
-        ? "Key: " + keyName(key) + " - Capo " + capo.fret + " (" + transposedKeyName(key, -capo.fret) + ")"
-        : "Key: " + keyName(key) + " - No capo";
-    }
-    if (isTeacher && capo.mode === "none") return "Key: " + keyName(key) + " - No capo";
-    return capoLabel(key);
+    const base = "Key: " + keyName(key);
+    if (!isTeacher) return capoLabel(key);
+    const full = capo.capo > 0 ? "Capo " + capo.capo + " (" + transposedKeyName(key, -capo.capo) + ")" : null;
+    const cut = capo.cut ? "cut capo (fret " + cutFret + ")" : null;
+    if (full && cut) return base + " - " + full + " + " + cut;
+    if (full) return base + " - " + full;
+    if (cut) return base + " - Cut capo (fret " + cutFret + ")";
+    return base;
   };
 
   const showNotice = detected && detected.minorSurface && !noticeDismissed && !keyOverride;
@@ -212,16 +215,17 @@ function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchCha
           {keyOverride && !pickKey && <div className="sb-muted" style={{ marginTop: 4 }}>key set manually</div>}
           {isTeacher && (
             <div className="sb-capo">
-              <select value={capo.mode} onChange={(e) => setCapo({ mode: e.target.value, fret: e.target.value === "cut" ? 2 : capo.fret })} title="Capo mode">
-                <option value="none">No capo</option>
-                <option value="full">Full capo</option>
-                <option value="cut">Cut capo</option>
-              </select>
-              {capo.mode === "full" && (
-                <select value={capo.fret} onChange={(e) => setCapo({ mode: "full", fret: Number(e.target.value) })} title="Capo fret">
-                  {[0, 1, 2, 3, 4, 5, 6, 7].map((f) => <option key={f} value={f}>{f === 0 ? "fret 0" : "fret " + f}</option>)}
+              <label className="sb-capo-lbl">Capo
+                <select value={capo.capo} onChange={(e) => setCapo({ ...capo, capo: Number(e.target.value) })} title="Full capo fret">
+                  {Array.from({ length: MAX_FULL_CAPO + 1 }, (_, f) => f).map((f) => (
+                    <option key={f} value={f}>{f === 0 ? "none" : "fret " + f}</option>
+                  ))}
                 </select>
-              )}
+              </label>
+              <button className={"sb-tool" + (capo.cut ? " on" : "")} onClick={() => setCapo({ ...capo, cut: !capo.cut })}
+                title="Partial capo on the A, D and G strings, always two frets above the full capo">
+                Cut capo{capo.cut ? " · fret " + cutFret : ""}
+              </button>
             </div>
           )}
         </div>
@@ -257,7 +261,7 @@ function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchCha
         })}
       </div>
 
-      {cutCapoMode && <div className="sb-cc-hint">Cut capo at fret 2 (A, D and G strings). Tap any chord to see whether it survives the capo.</div>}
+      {cutOn && <div className="sb-cc-hint">Cut capo at fret {cutFret} (A, D and G strings{capo.capo > 0 ? ", two frets above the capo at " + capo.capo : ""}). Tap any chord to see whether it survives the capo.</div>}
 
       {blockOrder.map((bid, idx) => {
         const b = chart.blocks.find((x) => x.id === bid);
@@ -278,7 +282,7 @@ function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchCha
                 <div className="sb-line">
                   {segmentsOf(ln).map((sg, si) => (
                     <span className="sb-seg" key={si}>
-                      {sg.chord && cutCapoMode
+                      {sg.chord && cutOn
                         ? <span className="sb-chord tappable" role="button" tabIndex={0}
                             onClick={() => setTapped(sg.chord)}
                             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setTapped(sg.chord); } }}
@@ -296,7 +300,7 @@ function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchCha
       })}
       {chart.notes.length > 0 && <div className="sb-muted">{chart.notes.join(" ")}</div>}
 
-      {cutCapoMode && tapped && <CutCapoPopup token={tapped} onClose={() => setTapped(null)} />}
+      {cutOn && tapped && <CutCapoPopup token={tapped} capoSetting={capo} onClose={() => setTapped(null)} />}
     </div>
   );
 }
@@ -305,14 +309,20 @@ function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchCha
 // CUT CAPO POPUP — the question this feature exists to answer:
 // does this chord survive the cut capo, yes or no?
 // ============================================================
-function CutCapoPopup({ token, onClose }) {
-  const result = useMemo(() => cutCapoVoicingsFor(token, 2), [token]);
+function CutCapoPopup({ token, capoSetting, onClose }) {
+  const result = useMemo(() => cutCapoAnswerFor(token, capoSetting, 2), [token, capoSetting]);
+  const capo = result.capo || 0;
+  const setup = (capo > 0 ? "capo " + capo + " + " : "") + "cut capo at fret " + result.cutFret;
   return (
     <div className="sb-modal" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="sb-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sb-sheet-top">
-          <span className="sb-sheet-name">{result.label || token}</span>
-          <span className="sb-sheet-sub">cut capo · fret 2 · A D G</span>
+          <span className="sb-sheet-name">{result.soundingLabel || token}</span>
+          <span className="sb-sheet-sub">
+            {result.transposed
+              ? "sounding · play " + result.shapeLabel + " shape · " + setup
+              : setup}
+          </span>
           <button className="sb-sheet-close" onClick={onClose}>Close</button>
         </div>
 
@@ -329,7 +339,7 @@ function CutCapoPopup({ token, onClose }) {
             <div className="sb-cc-no-body">
               Remove the capo for this song.
               {result.missing && result.missing.length > 0 && (
-                <> The closest shape drops {result.missing.join(" and ")}, so it is not really {result.label}.</>
+                <> The closest shape drops {result.missing.join(" and ")}, so it is not really {result.shapeLabel}.</>
               )}
             </div>
           </div>
@@ -344,9 +354,9 @@ function CutCapoPopup({ token, onClose }) {
                   <span>{i === 0 ? "Best shape" : "Alternative"}</span>
                   <span>{v.openCount} ringing · {v.frettedCount === 0 ? "no fingers" : v.frettedCount + " fingered"}{v.span > 0 ? " · " + (v.span + 1) + "-fret span" : ""}</span>
                 </div>
-                <CutCapoDiagram shape={v.shape} />
+                <CutCapoDiagram shape={v.shape} capo={capo} cut />
                 <div className="sb-cc-card-top" style={{ marginTop: 6 }}>
-                  <span>Notes low→high</span>
+                  <span>Notes low→high{capo > 0 ? " (sounding)" : ""}</span>
                   <span className="sb-cc-notes">{v.notes.join(" · ")}</span>
                 </div>
               </div>

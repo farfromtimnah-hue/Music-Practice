@@ -3,9 +3,15 @@
 //
 // A compact read-only fretboard for the chord popup, drawn the same way
 // CutCapoStudio draws its board (horizontal neck, low E on top, nut on the
-// left, partial capo clamped across the A/D/G rows at fret 2) but windowed to
-// the frets a single shape actually uses, so it stays legible on a phone
-// propped on a music stand.
+// left) but windowed to the frets a single shape actually uses, so it stays
+// legible on a phone propped on a music stand.
+//
+// `shape` frets are measured from the EFFECTIVE NUT — the full capo when one
+// is on, the real nut otherwise. `capo` says how far up the neck that is, so
+// fret numbers can be printed absolutely (what Nicole reads off her own neck)
+// while the shape itself stays in the engine's coordinates. The full capo is
+// drawn as a barre across all six strings; the cut capo as a partial barre two
+// frets above it, on the A, D and G strings only.
 //
 // src/cutcapo/ is imported, never modified.
 // ============================================================
@@ -19,20 +25,29 @@ const MARGIN_RIGHT = 10;
 const MARGIN_BOTTOM = 10;
 const SINGLE_INLAYS = [3, 5, 7, 9, 12];
 
-// Window the board so the shape fits: always show the capo at fret 2, then
-// enough frets to cover the highest fingered note (minimum 5).
-const windowFor = (shape) => {
-  const fretted = shape.filter((f) => f != null && f > 0);
-  const last = Math.max(CAPO_FRET + 3, fretted.length ? Math.max(...fretted) + 1 : 0);
-  return { first: 1, last: Math.min(last, 12) };
+// Window the board so the shape fits. Frets here are ABSOLUTE (nut = 0). The
+// window starts at the full capo (or the nut) and runs far enough to cover the
+// cut capo and the highest fingered note.
+const windowFor = (shape, capo, cut) => {
+  const fretted = shape.filter((f) => f != null && f > 0).map((f) => f + capo);
+  const need = Math.max(
+    capo + CAPO_FRET + 1,
+    cut ? capo + CAPO_FRET + 1 : 0,
+    fretted.length ? Math.max(...fretted) + 1 : 0
+  );
+  const first = Math.max(1, capo + 1 - (capo > 0 ? 1 : 0));
+  return { first, last: Math.min(Math.max(need, first + 3), 14) };
 };
 
-export default function CutCapoDiagram({ shape, showNotes = true }) {
-  const { first, last } = windowFor(shape);
+export default function CutCapoDiagram({ shape, showNotes = true, capo = 0, cut = true }) {
+  const { first, last } = windowFor(shape, capo, cut);
+  const cutAbs = capo + CAPO_FRET;   // where the cut capo physically sits
+  const absFret = (f) => f + capo;   // engine fret -> absolute fret
   const count = last - first + 1;
   const stringY = (s) => MARGIN_TOP + s * STRING_GAP;
   const nutX = MARGIN_LEFT;
   const fretLineX = (f) => nutX + (f - first + 1) * FRET_GAP;
+  // x for an ABSOLUTE fret; 0 means the open/ringing marker left of the nut
   const noteX = (f) => (f === 0 ? nutX - 15 : nutX + (f - first + 0.5) * FRET_GAP);
   const boardW = nutX + count * FRET_GAP + MARGIN_RIGHT;
   const boardH = MARGIN_TOP + (NUM_STRINGS - 1) * STRING_GAP + MARGIN_BOTTOM;
@@ -71,9 +86,23 @@ export default function CutCapoDiagram({ shape, showNotes = true }) {
       ))}
       <rect x={nutX - 4} y={boardTop} width="5" height={boardBot - boardTop} rx="1.2" fill="#e8dcc0" />
 
-      {/* the partial capo itself — A, D and G rows only */}
-      {(() => {
-        const cy1 = stringY(1) - 9, cy3 = stringY(3) + 9, cx = noteX(CAPO_FRET);
+      {/* full capo — barre across ALL six strings at its fret */}
+      {capo > 0 && capo >= first && (() => {
+        const cx = noteX(capo);
+        const y0 = stringY(0) - 9, y5 = stringY(5) + 9;
+        return (
+          <g>
+            <rect x={cx - 6.5} y={y0} width="13" height={y5 - y0} rx="5"
+              fill="#3b2f46" stroke="#0d0f13" strokeWidth="1.2" />
+            <circle cx={cx} cy={y0} r="3.6" fill="#141821" stroke="#6a5a7a" strokeWidth="1" />
+            <circle cx={cx} cy={y5} r="3.6" fill="#141821" stroke="#6a5a7a" strokeWidth="1" />
+          </g>
+        );
+      })()}
+
+      {/* cut capo — partial barre two frets above, A, D and G rows only */}
+      {cut && (() => {
+        const cy1 = stringY(1) - 9, cy3 = stringY(3) + 9, cx = noteX(cutAbs);
         return (
           <g>
             <rect x={cx - 6} y={cy1} width="12" height={cy3 - cy1} rx="5"
@@ -97,9 +126,9 @@ export default function CutCapoDiagram({ shape, showNotes = true }) {
         if (n == null) return null;
         return (
           <g key={"dot" + s}>
-            <circle cx={noteX(f)} cy={stringY(s)} r="8.5" fill="#f0c040" stroke="#1a1208" strokeWidth="1" />
+            <circle cx={noteX(absFret(f))} cy={stringY(s)} r="8.5" fill="#f0c040" stroke="#1a1208" strokeWidth="1" />
             {showNotes && (
-              <text x={noteX(f)} y={stringY(s) + 3} textAnchor="middle" fontSize="9"
+              <text x={noteX(absFret(f))} y={stringY(s) + 3} textAnchor="middle" fontSize="9"
                 fontWeight="700" fontFamily="Oswald,sans-serif" fill="#1a1208">{CHROMA[n]}</text>
             )}
           </g>

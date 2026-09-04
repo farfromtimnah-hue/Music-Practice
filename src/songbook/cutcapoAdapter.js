@@ -18,9 +18,9 @@
 //    shape for every minor-7 chord in the library. Minor qualities are
 //    therefore resolved here, before the engine sees the token.
 // ============================================================
-import { parseChord as ccParseChord, chordLabel, getType } from "../cutcapo/chords.js";
+import { parseChord as ccParseChord, chordLabel, getType, ROOTS } from "../cutcapo/chords.js";
 import { generateVoicings } from "../cutcapo/voicing.js";
-import { CHROMA } from "../cutcapo/tuning.js";
+import { CHROMA, CAPO_FRET } from "../cutcapo/tuning.js";
 
 // Chart suffix -> the engine's own suffix vocabulary. Order matters: longest
 // and most specific first, and every minor form is pinned explicitly so it can
@@ -163,19 +163,132 @@ export const cutCapoVoicingsFor = (token, limit = 2) => {
 };
 
 // ---------------------------------------------------------------------------
-// CAPO SETTING — persisted per chart as { mode, fret }.
-// Older builds stored a bare number meaning "full capo at that fret"; that
-// shape is migrated on read so nothing breaks.
+// CAPO SETTING — persisted per chart as { capo, cut }.
+//
+// PHYSICAL MODEL. A full capo clamps all six strings at `capo` (0 = none, up
+// to 7). A cut capo is a partial capo over the A, D and G strings only, and it
+// always sits exactly two frets above whatever is below it: two above the nut
+// with no full capo, two above the full capo when one is on. It therefore has
+// no fret number of its own — it is a boolean, and its position is DERIVED:
+//
+//     cutFret = capo + 2
+//
+// The two are independent. capo 2 with cut on is a real and common setup.
+//
+// Older builds stored one of several shapes; all of them are migrated on read
+// and the new shape is written going forward. Never throws.
 // ---------------------------------------------------------------------------
-export const DEFAULT_CAPO = { mode: "none", fret: 0 };
+export const MAX_FULL_CAPO = 7;
+export const DEFAULT_CAPO = { capo: 0, cut: false };
+
+const clampCapo = (n) => {
+  const v = Math.round(Number(n));
+  if (!Number.isFinite(v)) return 0;
+  return Math.max(0, Math.min(MAX_FULL_CAPO, v));
+};
 
 export const normalizeCapoSetting = (raw) => {
-  if (raw == null) return { ...DEFAULT_CAPO };
-  if (typeof raw === "number") return { mode: raw > 0 ? "full" : "none", fret: raw };
-  if (typeof raw === "object") {
-    const mode = raw.mode === "full" || raw.mode === "cut" ? raw.mode : "none";
-    const fret = mode === "cut" ? 2 : Math.max(0, Math.min(7, Number(raw.fret) || 0));
-    return { mode, fret };
-  }
+  try {
+    if (raw == null) return { ...DEFAULT_CAPO };
+    // legacy: a bare number meant "full capo at that fret"
+    if (typeof raw === "number") return { capo: clampCapo(raw), cut: false };
+    if (typeof raw === "string") {
+      const n = Number(raw);
+      return Number.isFinite(n) ? { capo: clampCapo(n), cut: false } : { ...DEFAULT_CAPO };
+    }
+    if (typeof raw === "object") {
+      // current shape
+      if ("cut" in raw || "capo" in raw) {
+        return { capo: clampCapo(raw.capo), cut: raw.cut === true };
+      }
+      // legacy: { mode: "none" | "full" | "cut", fret }
+      if (raw.mode === "cut") return { capo: 0, cut: true };
+      if (raw.mode === "full") return { capo: clampCapo(raw.fret), cut: false };
+      return { ...DEFAULT_CAPO };
+    }
+  } catch (e) { /* fall through */ }
   return { ...DEFAULT_CAPO };
+};
+
+/** Where the cut capo physically sits. Always derived, never stored. */
+export const cutFretOf = (setting) => clampCapo(setting && setting.capo) + CAPO_FRET;
+
+/**
+ * Sounding chord + full capo -> the chord shape actually being fingered.
+ * With a capo at fret n, a shape n semitones lower sounds as the written
+ * chord, so the fingered shape is the chord transposed DOWN by n.
+ * Returns a chord token spelled the way the cut-capo engine expects.
+ */
+export const shapeTokenFor = (token, capoFret) => {
+  const c = chartChordToCutCapo(token);
+  if (!c) return null;
+  const n = ((-(capoFret || 0)) % 12 + 12) % 12;
+  const shiftName = (name) => (name ? CHROMA[(ROOTS.indexOf(name) + n) % 12] : null);
+  const root = shiftName(c.root);
+  const bass = shiftName(c.bass);
+  if (!root) return null;
+  return { root, typeId: c.typeId, bass, label: chordLabel(root, c.typeId, bass), reduced: c.reduced };
+};
+
+/**
+ * The full answer for one chord under a { capo, cut } setting.
+ *
+ * The engine models the cut capo at CAPO_FRET measured from the nut with the
+ * outer strings open. A full capo just moves that whole system up: it becomes
+ * the effective nut. So the shape is computed by transposing the sounding
+ * chord DOWN by the full capo fret, running the existing engine unchanged, and
+ * reporting the capo offset so the diagram can number its frets absolutely.
+ *
+ * Returns:
+ *   { status: "not-a-chord" }
+ *   { status: "unplayable", soundingLabel, shapeLabel, capo, cutFret, missing }
+ *   { status: "ok", soundingLabel, shapeLabel, capo, cutFret, reduced, voicings }
+ * where each voicing's `shape` holds frets measured from the FULL CAPO (the
+ * effective nut), and `capo` says how far up the neck that sits.
+ */
+export const cutCapoAnswerFor = (token, setting, limit = 2) => {
+  const s = normalizeCapoSetting(setting);
+  const capo = s.capo;
+  const cutFret = cutFretOf(s);
+  const sounding = chartChordToCutCapo(token);
+  if (!sounding) return { status: "not-a-chord", token, capo, cutFret };
+
+  const shape = shapeTokenFor(token, capo);
+  if (!shape) return { status: "not-a-chord", token, capo, cutFret };
+
+  const { voicings, partial } = generateVoicings(shape.root, shape.typeId, { bass: shape.bass });
+  const complete = partial ? [] : voicings.filter((v) => !v.missing || v.missing.length === 0);
+  const base = {
+    soundingLabel: sounding.label,
+    shapeLabel: shape.label,
+    capo,
+    cutFret,
+    transposed: capo > 0,
+  };
+  if (!complete.length) {
+    const closest = voicings[0];
+    return { ...base, status: "unplayable", missing: closest && closest.missing ? closest.missing : [] };
+  }
+  const ranked = complete.slice().sort((a, b) =>
+    b.analysis.openCount - a.analysis.openCount ||
+    a.analysis.span - b.analysis.span ||
+    a.analysis.frettedCount - b.analysis.frettedCount ||
+    b.score - a.score);
+  return {
+    ...base,
+    status: "ok",
+    reduced: shape.reduced,
+    voicings: ranked.slice(0, limit).map((v) => ({
+      shape: v.shape,
+      openCount: v.analysis.openCount,
+      span: v.analysis.span,
+      frettedCount: v.analysis.frettedCount,
+      // The engine works in SHAPE space (as if the full capo were the nut), so
+      // its pitch classes are the shape's, not what the guitar actually sounds.
+      // Transpose up by the capo fret to report the real sounding notes.
+      notes: v.analysis.sounding.map((x) => CHROMA[(x.pc + capo) % 12]),
+      bassNote: v.bassNote ? CHROMA[(ROOTS.indexOf(v.bassNote) + capo) % 12] : null,
+      missing: v.missing || [],
+    })),
+  };
 };
