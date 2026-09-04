@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import library from "./library.json";
 import { buildSearchIndex, search } from "./search.js";
 import { matchSetItem, pickChart } from "./match.js";
@@ -17,6 +17,10 @@ const PREFS_KEY = "songbook_prefs";
 
 const S = `
 .sb{background:#000;color:#fff;min-height:100vh;font-family:'Source Sans 3',sans-serif;padding-bottom:40px;}
+/* Chart view is a fixed pane, never a scrolling page: the whole song is on
+   screen at once, because both of Nicole's hands are on the guitar. dvh, not
+   vh — iOS Safari's collapsing toolbars make vh taller than what you can see. */
+.sb.sb-fixed{min-height:0;height:100dvh;padding-bottom:0;overflow:hidden;}
 .sb *{box-sizing:border-box;}
 .sb-wrap{max-width:900px;margin:0 auto;padding:12px 14px;}
 .sb-top{display:flex;align-items:center;gap:10px;padding:6px 0 10px;}
@@ -40,34 +44,65 @@ const S = `
 .sb-hit{font-size:13px;color:#ccc;margin-top:3px;font-style:italic;}
 .sb-hit b{color:var(--gold,#f0c040);font-style:normal;}
 /* chart */
+/* Chart pane: header rows are fixed height, the chart body takes the rest and
+   the auto-fit measures THAT box, not the viewport. min-height:0 is what lets
+   a flex child actually shrink instead of pushing the pane taller. */
+/* No max-width on the chart pane: width is what the auto-fit converts into
+   font size, so throwing any of it away costs readability directly. */
+.sb-pane{height:100dvh;display:flex;flex-direction:column;margin:0 auto;padding:5px 12px 4px;overflow:hidden;}
+.sb-pane-head{flex:0 0 auto;}
+.sb-body{flex:1 1 auto;min-height:0;overflow:hidden;position:relative;display:flex;flex-direction:column;justify-content:center;}
+/* The measured content. Everything inside sizes off --sbfs, so one variable
+   scales chords, lyrics, glosses and section labels together, proportionally. */
+/* Chord charts are tall and narrow, so on any screen wider than a phone most
+   of the width is wasted and the fit has to shrink the type to compensate.
+   Columns turn that wasted width back into font size: the same song at twice
+   the point size. Blocks never break across a column, for the same reason
+   they never break across a page. */
+.sb-fit{--sbfs:18px;--sbcols:1;font-size:var(--sbfs);column-count:var(--sbcols);column-gap:1.6em;column-fill:auto;}
+.sb-fit>*{break-inside:avoid;-webkit-column-break-inside:avoid;}
+/* A song that does not fill the height sits in the middle of the space rather
+   than clinging to the top — done by the flex box above, so there is no state
+   to keep in sync with the measurement. */
+.sb-fit{width:100%;flex:0 0 auto;}
 .sb-chart-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:6px;}
-.sb-title{font-family:'Oswald',sans-serif;font-size:22px;color:#fff;line-height:1.15;}
-.sb-alt{font-size:14px;color:#8888aa;margin-top:2px;}
-.sb-meta{font-size:12px;color:#8888aa;margin-top:4px;}
+.sb-title{font-family:'Oswald',sans-serif;font-size:19px;color:#fff;line-height:1.15;}
+.sb-alt{font-size:13px;color:#8888aa;}
+.sb-meta{font-size:11px;color:#8888aa;}
 .sb-key{text-align:right;white-space:nowrap;}
 .sb-key-main{font-family:'Oswald',sans-serif;font-size:18px;color:var(--gold,#f0c040);background:none;border:1px solid #2a2a40;border-radius:10px;padding:6px 10px;cursor:pointer;}
-.sb-legend{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;margin-top:6px;}
-.sb-legend span{font-size:12px;color:#ccc;background:#0e0e16;border:1px solid #2a2a40;border-radius:6px;padding:2px 6px;}
+.sb-legend{display:flex;flex-wrap:wrap;gap:5px;justify-content:flex-end;margin-top:3px;}
+.sb-legend span{font-size:11px;color:#ccc;background:#0e0e16;border:1px solid #2a2a40;border-radius:6px;padding:2px 6px;}
 .sb-legend span b{color:var(--gold,#f0c040);}
 .sb-tools{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;}
+/* One tight row: every pixel these take is a pixel the lyrics do not get. */
+.sb-bar{display:flex;gap:5px;align-items:center;flex-wrap:nowrap;overflow-x:auto;margin:2px 0 3px;scrollbar-width:none;}
+.sb-bar::-webkit-scrollbar{display:none;}
+.sb-bar .sb-tool{padding:3px 8px;font-size:12px;white-space:nowrap;flex:0 0 auto;}
+.sb-bar .sb-key-main{font-size:14px;padding:3px 8px;flex:0 0 auto;}
+.sb-bar select{padding:3px 6px;font-size:12px;flex:0 0 auto;}
+.sb-bar .sb-capo-lbl{flex:0 0 auto;}
+.sb-bar-sp{flex:1 1 auto;}
+.sb-legend-i{flex:0 0 auto;font-size:11px;color:#ccc;background:#0e0e16;border:1px solid #2a2a40;border-radius:6px;padding:1px 5px;white-space:nowrap;}
+.sb-legend-i b{color:var(--gold,#f0c040);}
 .sb-tool{border:1px solid #2a2a40;background:#0e0e16;color:#aaa;border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;font-family:inherit;}
 .sb-tool.on{color:var(--gold,#f0c040);border-color:var(--gold,#f0c040);}
-.sb-notice{background:#0b1a2e;border:1px solid #1e3a5f;color:#cfe3ff;border-radius:10px;padding:10px 12px;font-size:13px;margin:8px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+.sb-notice{background:#0b1a2e;border:1px solid #1e3a5f;color:#cfe3ff;border-radius:10px;padding:5px 9px;font-size:12px;margin:3px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
 .sb-notice .sb-tool{color:#cfe3ff;border-color:#1e3a5f;}
-.sb-map{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;margin:8px 0 14px;font-size:14px;color:#8fa3c7;}
+.sb-map{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;margin:0 0 .5em;font-size:.78em;color:#8fa3c7;}
 .sb-map .sb-map-item{background:#0b1226;border:1px solid #1c2a4a;border-radius:6px;padding:2px 8px;white-space:nowrap;}
 .sb-map .sb-map-item.x{color:#5d6f95;border-style:dashed;}
-.sb-block{margin:0 0 18px;border-left:3px solid #14213d;padding-left:10px;position:relative;}
+.sb-block{margin:0 0 .85em;border-left:3px solid #14213d;padding-left:.55em;position:relative;}
 .sb-block.drag{opacity:.5;}
-.sb-block-label{font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#4a6da7;margin-bottom:6px;display:flex;align-items:center;gap:8px;}
+.sb-block-label{font-family:'Oswald',sans-serif;font-size:.66em;letter-spacing:2px;text-transform:uppercase;color:#4a6da7;margin-bottom:.25em;display:flex;align-items:center;gap:8px;}
 .sb-handle{margin-left:auto;display:flex;gap:4px;}
 .sb-handle button{border:1px solid #2a2a40;background:#0e0e16;color:#aaa;border-radius:6px;padding:2px 8px;font-size:14px;cursor:pointer;touch-action:none;}
-.sb-line{display:flex;flex-wrap:wrap;align-items:flex-end;margin:0 0 2px;line-height:1.25;}
+.sb-line{display:flex;flex-wrap:wrap;align-items:flex-end;margin:0;line-height:1.2;}
 .sb-seg{display:inline-flex;flex-direction:column;white-space:pre;}
-.sb-chord{font-family:'Oswald',sans-serif;font-weight:700;font-size:20px;color:var(--gold,#f0c040);min-height:24px;padding-right:8px;}
-.sb-chord small{font-size:12px;color:#c9b06a;font-weight:400;}
-.sb-txt{font-size:18px;color:#fff;min-height:22px;}
-.sb-gloss{font-size:12px;color:#7a7a99;letter-spacing:.5px;margin:0 0 8px;text-transform:uppercase;}
+.sb-chord{font-family:'Oswald',sans-serif;font-weight:700;font-size:1.05em;color:var(--gold,#f0c040);min-height:1.2em;padding-right:.4em;line-height:1.15;}
+.sb-chord small{font-size:.62em;color:#c9b06a;font-weight:400;}
+.sb-txt{font-size:1em;color:#fff;min-height:1.15em;line-height:1.2;}
+.sb-gloss{font-size:.72em;color:#9a9ac0;letter-spacing:.5px;margin:0 0 .28em;text-transform:uppercase;line-height:1.15;}
 .sb-empty{color:#8888aa;font-size:14px;padding:20px 0;text-align:center;}
 /* capo control + cut-capo chord popup (teacher only) */
 .sb-capo{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end;margin-top:6px;}
@@ -75,7 +110,7 @@ const S = `
 .sb-capo-lbl{display:flex;align-items:center;gap:5px;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:#8888aa;}
 .sb-chord.tappable{cursor:pointer;}
 .sb-chord.tappable:hover{text-decoration:underline;}
-.sb-cc-hint{font-size:12px;color:#8888aa;margin:-4px 0 10px;}
+.sb-cc-hint{font-size:12px;color:#8888aa;margin:0 0 4px;}
 .sb-modal{position:fixed;inset:0;background:rgba(0,0,0,.82);display:flex;align-items:flex-end;justify-content:center;z-index:500;}
 .sb-sheet{background:#0e0e16;border:1.5px solid #2a2a40;border-radius:16px 16px 0 0;width:100%;max-width:560px;max-height:86vh;overflow-y:auto;padding:16px 16px 26px;}
 @media (min-width:600px){.sb-modal{align-items:center;}.sb-sheet{border-radius:16px;}}
@@ -91,15 +126,20 @@ const S = `
 .sb-cc-no-body{font-size:14px;color:#e8c4c2;line-height:1.45;}
 .sb-cc-warn{font-size:12px;color:#e0b050;background:rgba(240,192,64,.08);border:1px solid rgba(240,192,64,.3);border-radius:9px;padding:7px 9px;margin-top:10px;line-height:1.4;}
 /* set navigation — one gesture to the next song, on stage, mid-song */
-.sb-swipe{touch-action:pan-y;}
-.sb-pos{display:inline-block;font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:1px;color:#8888aa;border:1px solid #2a2a40;border-radius:8px;padding:2px 8px;margin-bottom:4px;}
-.sb-nav{display:flex;gap:10px;align-items:stretch;margin:14px 0 4px;}
-.sb-nav button{flex:1;min-height:64px;border:1.5px solid #2a2a40;background:#0e0e16;color:var(--gold,#f0c040);border-radius:14px;font-family:'Oswald',sans-serif;font-size:17px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;padding:10px 14px;display:flex;flex-direction:column;justify-content:center;gap:2px;}
+/* Nothing here scrolls, so the browser has no pan of its own to protect and
+   every gesture is ours to read. */
+.sb-swipe{touch-action:none;}
+.sb-pos{display:inline-block;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1px;color:#8888aa;border:1px solid #2a2a40;border-radius:8px;padding:1px 7px;margin-right:8px;vertical-align:middle;}
+.sb-page{display:inline-block;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1px;color:var(--gold,#f0c040);border:1px solid #5a4410;background:rgba(240,192,64,.08);border-radius:8px;padding:1px 7px;margin-left:8px;vertical-align:middle;}
+.sb-headline{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;}
+.sb-nav{flex:0 0 auto;display:flex;gap:8px;align-items:stretch;margin:3px 0 0;}
+.sb-nav button{flex:1;min-height:44px;border:1.5px solid #2a2a40;background:#0e0e16;color:var(--gold,#f0c040);border-radius:12px;font-family:'Oswald',sans-serif;font-size:15px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;padding:5px 12px;display:flex;flex-direction:column;justify-content:center;gap:1px;}
 .sb-nav button:disabled{opacity:.3;color:#8888aa;cursor:default;}
 .sb-nav-next{align-items:flex-end;text-align:right;}
 .sb-nav-prev{align-items:flex-start;text-align:left;}
-.sb-nav-song{font-family:'Source Sans 3',sans-serif;font-size:13px;letter-spacing:0;text-transform:none;color:#8888aa;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-@media (max-width:480px){.sb-chord{font-size:18px;}.sb-txt{font-size:16px;}.sb-title{font-size:19px;}}
+.sb-nav-song{font-family:'Source Sans 3',sans-serif;font-size:12px;letter-spacing:0;text-transform:none;color:#8888aa;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* No per-breakpoint chart type any more: the auto-fit is the responsive rule. */
+@media (max-width:480px){.sb-title{font-size:19px;}}
 `;
 
 const fmtTime = (iso) => { try { const d = new Date(iso); return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) + " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }); } catch (e) { return ""; } };
@@ -117,6 +157,118 @@ const segmentsOf = (line) => {
     segs.push({ chord: c.chord, text: text.slice(c.pos, Math.max(c.pos, end)) });
   });
   return segs;
+};
+
+// ============================================================
+// FIT TO SCREEN
+// The third-party app this replaces puts the whole song on one screen and
+// Nicole never scrolls. Everything below exists to reproduce that: measure
+// the rendered chart against the box it has to live in, and shrink the type
+// until it fits. Only when the minimum readable size still overflows do we
+// break the song into pages — at section boundaries, never mid-verse.
+// ============================================================
+const FIT_MIN = 8;    // px — below this it stops being readable on stage
+const FIT_MAX = 28;   // px — above this the type just looks broken
+const FIT_EPS = 0.25; // px — stop the binary search once this close
+
+// Binary-search the largest font size at which `el` fits inside the box.
+// With columns the element is pinned to the box height and the content flows
+// sideways, so "does it fit" becomes "did it stay inside the last column".
+const fitFontSize = (el, availH, availW, cols) => {
+  el.style.setProperty("--sbcols", cols);
+  el.style.height = cols > 1 ? availH + "px" : "";
+  const fits = (px) => {
+    el.style.setProperty("--sbfs", px + "px");
+    // Reading a layout property forces the reflow we are about to measure.
+    return el.scrollHeight <= (cols > 1 ? el.clientHeight : availH) + 0.5 && el.scrollWidth <= availW + 1;
+  };
+  if (fits(FIT_MAX)) return { size: FIT_MAX, overflow: false };
+  if (!fits(FIT_MIN)) return { size: FIT_MIN, overflow: true };
+  let lo = FIT_MIN, hi = FIT_MAX;
+  while (hi - lo > FIT_EPS) {
+    const mid = (lo + hi) / 2;
+    if (fits(mid)) lo = mid; else hi = mid;
+  }
+  el.style.setProperty("--sbfs", lo + "px");
+  return { size: lo, overflow: false };
+};
+
+// How many columns the box can carry. A column narrower than this is not a
+// chord chart any more, it is a word list with the chords wrapped off their
+// syllables, so the count is capped by width, not by ambition.
+const MIN_COL_W = 260;
+const maxColsFor = (availW) => Math.max(1, Math.min(3, Math.floor(availW / MIN_COL_W)));
+
+// Try every column count and keep whichever gives the largest readable type.
+// One column always wins on a phone; two or three win on a laptop or a
+// landscape iPad, where a single column wastes most of the screen.
+//
+// When NOTHING fits — the song is too long for this box even at the minimum
+// size — the widest layout wins instead, because that is the one the caller
+// is about to paginate against. Leaving a losing single column applied here
+// is what makes a paginated song render clipped: the page budget assumes the
+// columns that the element was never actually given.
+const bestFit = (el, availH, availW) => {
+  const maxCols = maxColsFor(availW);
+  let best = null;
+  for (let c = 1; c <= maxCols; c++) {
+    const r = fitFontSize(el, availH, availW, c);
+    if (!best || (!r.overflow && (best.overflow || r.size > best.size + 0.5))) best = { ...r, cols: c };
+    if (best && !best.overflow && best.size >= FIT_MAX) break;
+  }
+  const cols = best.overflow ? maxCols : best.cols;
+  // Re-apply the winner: the loop left the element on the last count tried.
+  return { ...fitFontSize(el, availH, availW, cols), cols };
+};
+
+// Split the block list into the fewest pages that each fit, balanced so the
+// last page is not a lonely orphan. Blocks are atomic: a verse or a chorus is
+// never cut in half, which is the whole point — a break inside a chorus is
+// worse than no break at all.
+const paginateBlocks = (host, ids, availH, cols) => {
+  // Measure at the minimum size in ONE column: a block's own height does not
+  // depend on how many columns it will later be laid into, and the page
+  // budget is the column height multiplied by the column count.
+  host.style.setProperty("--sbcols", 1);
+  host.style.height = "";
+  host.style.setProperty("--sbfs", FIT_MIN + "px");
+  const els = ids.map((id) => host.querySelector('[data-block="' + id + '"]'));
+  if (els.some((el) => !el)) return [ids];
+  const heights = els.map((el) => {
+    const st = window.getComputedStyle(el);
+    return el.offsetHeight + parseFloat(st.marginTop || 0) + parseFloat(st.marginBottom || 0);
+  });
+
+  // Greedily pack into `budget` px per page; returns null if any single
+  // block is taller than the budget, which no split can fix.
+  const pack = (budget) => {
+    const pages = [];
+    let cur = [], h = 0;
+    for (let i = 0; i < ids.length; i++) {
+      if (heights[i] > budget && !cur.length) { pages.push([ids[i]]); continue; }
+      if (cur.length && h + heights[i] > budget) { pages.push(cur); cur = []; h = 0; }
+      cur.push(ids[i]); h += heights[i];
+    }
+    if (cur.length) pages.push(cur);
+    return pages;
+  };
+
+  // Columns never pack perfectly — a block that will not fit in the space left
+  // at the foot of a column gets pushed whole to the next one — so the usable
+  // budget is a little under the raw column area. Aiming slightly low here is
+  // what stops a page being declared to fit and then rendering clipped.
+  const budget = availH * cols * (cols > 1 ? 0.88 : 1);
+  const minPages = pack(budget).length;
+  if (minPages <= 1) return [ids];
+  // Spread the song evenly over that page count instead of cramming the early
+  // pages full and leaving the last one nearly empty — every page then has
+  // room to scale its type up, which is the reason to paginate at all.
+  const total = heights.reduce((a, b) => a + b, 0);
+  for (let slack = 1.0; slack <= 1.5; slack += 0.05) {
+    const even = pack((total / minPages) * slack);
+    if (even.length === minPages) return even;
+  }
+  return pack(budget);
 };
 
 // ============================================================
@@ -216,10 +368,152 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId,
     if (!target) return;
     setTapped(null);
     setPickKey(false);
+    // Instant, like turning a page: chart data is already local, and the
+    // per-chart capo / key / block order are keyed by chartId, so they come
+    // back with the song rather than being reset by the move.
     onNavigate(target);
-    // Instant, like turning a page: chart data is already local.
-    window.scrollTo(0, 0);
   }, [nav, navIdx, editing, onNavigate]);
+
+  // ----------------------------------------------------------
+  // FIT / PAGES — measure after every render that can change the
+  // content height, then scale the type until the song fits its box.
+  // Every block stays in the DOM at all times; the ones that belong to
+  // another page are hidden by the measurer. That is what lets the fit
+  // re-test the WHOLE song on every resize and collapse back to one
+  // page as soon as it can, which is always the better answer.
+  // ----------------------------------------------------------
+  const bodyRef = useRef(null);
+  const fitRef = useRef(null);
+  const [pages, setPages] = useState(null);   // null = the song is on one page
+  const [page, setPage] = useState(0);
+
+  const pageCount = pages ? pages.length : 1;
+  const curPage = Math.min(page, pageCount - 1);
+  // The measurer reads these through refs. They must NOT be effect deps: the
+  // measurer is what writes them, and a write that re-triggers the measurer
+  // is an infinite layout loop, not a re-fit.
+  const pagesRef = useRef(pages);
+  pagesRef.current = pages;
+  const pageRef = useRef(curPage);
+  pageRef.current = curPage;
+
+  // Vertical paging never wraps and never leaves the song, the same way
+  // horizontal never wraps out of the set.
+  const turnPage = useCallback((dir) => {
+    if (editing) return;
+    setPage((p) => Math.max(0, Math.min(pageCount - 1, p + dir)));
+  }, [editing, pageCount]);
+
+  // A new song always starts whole, on its first page. This runs in the
+  // layout phase, before the measurer below, so the measurer never sees the
+  // previous song's page split — two effects disagreeing about `pages` is
+  // how this loops forever.
+  const lastChart = useRef(chartId);
+  if (lastChart.current !== chartId) {
+    lastChart.current = chartId;
+    if (pages) setPages(null);
+    if (page !== 0) setPage(0);
+  }
+
+  // useLayoutEffect, not useEffect: the fit must be decided before the frame
+  // is painted, or the chart flashes at the wrong size on every song change.
+  // For the same reason nothing here waits on requestAnimationFrame — a
+  // backgrounded tab never fires one, and the chart would stay unfitted.
+  useLayoutEffect(() => {
+    const host = fitRef.current, box = bodyRef.current;
+    if (!host || !box) return;
+    let timer = 0, dead = false;
+    // The measurer writes styles inside the box it is observing, so the
+    // ResizeObserver hears its own echo. Remember the box we last fitted for
+    // and ignore any callback that is not actually a new size — otherwise
+    // every fit schedules another fit and the tab spins forever.
+    let lastH = -1, lastW = -1;
+
+    const blockEls = () => Array.from(host.querySelectorAll("[data-block]"));
+    const showAll = () => blockEls().forEach((el) => { el.style.display = ""; });
+    const showOnly = (ids) => blockEls().forEach((el) => {
+      el.style.display = ids.includes(Number(el.dataset.block)) ? "" : "none";
+    });
+
+    // `passes` bounds the settle loop below. Two passes is always enough in
+    // practice; the cap only exists so a pathological layout cannot spin.
+    const measure = (force, passes) => {
+      if (dead) return;
+      const availH = box.clientHeight, availW = box.clientWidth;
+      if (availH <= 0 || availW <= 0) return;
+      if (!force && availH === lastH && availW === lastW) return;
+      lastH = availH; lastW = availW;
+      // Always ask the whole song first. If it fits, there are no pages.
+      const had = pagesRef.current;
+      showAll();
+      const whole = bestFit(host, availH, availW);
+      if (!whole.overflow) {
+        if (had) setPages(null);
+        settle(availH, availW, passes);
+        return;
+      }
+
+      // It does not fit even at the minimum readable size, so it needs pages.
+      const split = paginateBlocks(host, blockOrder, availH, maxColsFor(availW));
+
+      let use = split;
+      let shown = use[Math.min(pageRef.current, use.length - 1)] || blockOrder;
+      showOnly(shown);
+      // Last line of defence: if the page we picked still overflows, split
+      // harder rather than render a clipped chart. Clipped lyrics on stage are
+      // the one outcome this whole feature exists to prevent.
+      for (let tighten = 0; tighten < 3 && bestFit(host, availH, availW).overflow; tighten++) {
+        const tighter = paginateBlocks(host, blockOrder, availH * (0.8 - tighten * 0.15), maxColsFor(availW));
+        if (tighter.length <= use.length) break;
+        use = tighter;
+        shown = use[Math.min(pageRef.current, use.length - 1)] || blockOrder;
+        showOnly(shown);
+      }
+      const settled = use === split ? split : use;
+      const sameFinal = had && had.length === settled.length &&
+        had.every((pg, i) => pg.length === settled[i].length && pg.every((id, j) => id === settled[i][j]));
+      if (!sameFinal) setPages(settled);
+      settle(availH, availW, passes);
+    };
+
+    // Hiding blocks and pinning the column height both change layout, so the
+    // box can be a different size by the time the fit finishes than it was
+    // when the fit started. When that happens, fit again against the size it
+    // actually ended up at — otherwise the chart keeps the previous screen's
+    // type size after a resize or an orientation change.
+    const settle = (usedH, usedW, passes) => {
+      if (dead || (passes || 0) >= 2) return;
+      const h = box.clientHeight, w = box.clientWidth;
+      if (h === usedH && w === usedW) return;
+      lastH = -1; lastW = -1;
+      measure(true, (passes || 0) + 1);
+    };
+
+    // Debounced so a resize drag or an observer storm does not thrash layout.
+    const schedule = () => { clearTimeout(timer); timer = setTimeout(() => measure(false, 0), 60); };
+
+    // The first pass is forced: the deps changed, so the content changed even
+    // when the box did not.
+    measure(true, 0);
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(schedule) : null;
+    if (ro) ro.observe(box);
+    window.addEventListener("resize", schedule);
+    window.addEventListener("orientationchange", schedule);
+    return () => {
+      dead = true;
+      clearTimeout(timer);
+      if (ro) ro.disconnect();
+      window.removeEventListener("resize", schedule);
+      window.removeEventListener("orientationchange", schedule);
+    };
+    // Everything the fitted height depends on: song, page, order, and every
+    // toggle that adds or removes a line.
+    // `pages` is a dep so the page indicator and the block visibility settle
+    // in the same render the split changes in. Both writes are idempotent —
+    // setPages to an equal value is skipped above, and React drops a set to
+    // the identical null — so this converges instead of spinning.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chartId, page, pages, blockOrder, prefs.gloss, prefs.legend, prefs.roadmapFull, editing, capo.capo, capo.cut, keyOverride, showNotice, cutOn]);
 
   // Pointer events, not touch events: the same code path serves the
   // iPad on stage and a mouse on the laptop while testing.
@@ -231,11 +525,11 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId,
   const inExempt = (el) => !!(el && el.closest && el.closest(".sb-modal, .sb-handle, input, textarea, select, button, [role=button]"));
 
   const onSwipeDown = (e) => {
-    if (!nav || editing || inExempt(e.target)) { swipeRef.current = null; return; }
+    if (editing || inExempt(e.target)) { swipeRef.current = null; return; }
     swipeRef.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
   };
-  // Deliberately no preventDefault here: vertical scrolling must stay
-  // completely untouched, and touch-action:pan-y leaves panning to Safari.
+  // Nothing scrolls here, so there is no native pan to preserve and no
+  // preventDefault to fight with; touch-action:none already gave us the axis.
   const onSwipeMove = () => {};
   const onSwipeEnd = (e) => {
     const s = swipeRef.current;
@@ -243,26 +537,40 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId,
     if (!s || s.id !== e.pointerId) return;
     const dx = e.clientX - s.x;
     const dy = e.clientY - s.y;
-    if (Math.abs(dx) < SWIPE_MIN) return;                     // too short — a tap or a scroll
-    if (Math.abs(dx) < SWIPE_RATIO * Math.abs(dy)) return;    // too vertical — that was a scroll
-    go(dx < 0 ? 1 : -1);                                      // drag left = forward
+    // The two axes stay strictly separate: horizontal changes song,
+    // vertical turns the page of the song you are already on.
+    if (Math.abs(dx) >= SWIPE_MIN && Math.abs(dx) >= SWIPE_RATIO * Math.abs(dy)) {
+      go(dx < 0 ? 1 : -1);                                    // drag left = forward
+      return;
+    }
+    if (pageCount > 1 && Math.abs(dy) >= SWIPE_MIN && Math.abs(dy) >= SWIPE_RATIO * Math.abs(dx)) {
+      turnPage(dy < 0 ? 1 : -1);                              // drag up = next page
+    }
   };
   const onSwipeCancel = () => { swipeRef.current = null; };
 
   useEffect(() => {
-    if (!nav) return;
     const onKey = (e) => {
-      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      const horizontal = e.key === "ArrowLeft" || e.key === "ArrowRight";
+      const vertical = e.key === "ArrowUp" || e.key === "ArrowDown";
+      if (!horizontal && !vertical) return;
       const t = e.target;
       const tag = t && t.tagName ? t.tagName.toLowerCase() : "";
       if (tag === "input" || tag === "textarea" || tag === "select" || (t && t.isContentEditable)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      e.preventDefault();
-      go(e.key === "ArrowRight" ? 1 : -1);
+      if (horizontal) {
+        if (!nav) return;
+        e.preventDefault();
+        go(e.key === "ArrowRight" ? 1 : -1);
+      } else {
+        if (pageCount <= 1) return;
+        e.preventDefault();
+        turnPage(e.key === "ArrowDown" ? 1 : -1);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [nav, go]);
+  }, [nav, go, pageCount, turnPage]);
 
   const navButtons = nav ? (
     <div className="sb-nav">
@@ -277,35 +585,37 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId,
     </div>
   ) : null;
 
+  const displayTitle = chart.lang === "pt" ? (chart.ptName || chart.names.primary) : (chart.enName || chart.names.primary);
+  const altTitle = chart.lang === "pt" ? chart.enName : chart.ptName;
+
   return (
-    <div className="sb-wrap sb-swipe"
+    <div className="sb-pane sb-swipe"
       onPointerDown={onSwipeDown} onPointerMove={onSwipeMove}
       onPointerUp={onSwipeEnd} onPointerCancel={onSwipeCancel}>
-      <div className="sb-top">
-        <button className="sb-back" onClick={onBack}>← Back</button>
-        <h1>{fromSet ? "This Week" : "Library"}</h1>
-      </div>
-      <div className="sb-chart-head">
-        <div>
-          {nav && <div className="sb-pos">{navIdx + 1} / {nav.list.length}</div>}
-          <div className="sb-title">{chart.lang === "pt" ? (chart.ptName || chart.names.primary) : (chart.enName || chart.names.primary)}</div>
-          {(chart.lang === "pt" ? chart.enName : chart.ptName) && <div className="sb-alt">{chart.lang === "pt" ? chart.enName : chart.ptName}</div>}
-          <div className="sb-meta">{chart.artist}{chart.tempo ? " · " + chart.tempo + " bpm" : ""}{chart.time ? " · " + chart.time : ""}</div>
+
+      <div className="sb-pane-head">
+        <div className="sb-headline">
+          <button className="sb-back" onClick={onBack}>←</button>
+          {nav && <span className="sb-pos">{navIdx + 1} / {nav.list.length}</span>}
+          <span className="sb-title">{displayTitle}</span>
+          {altTitle && <span className="sb-alt">{altTitle}</span>}
+          <span className="sb-meta">{chart.artist}{chart.tempo ? " · " + chart.tempo + " bpm" : ""}</span>
+          {pageCount > 1 && <span className="sb-page">{curPage + 1} / {pageCount}</span>}
         </div>
-        <div className="sb-key">
+
+        {/* One tight row. Everything these controls take, the lyrics lose. */}
+        <div className="sb-bar">
           <button className="sb-key-main" onClick={() => setPickKey((v) => !v)} title="Tap to change key">{keyHeader()}</button>
           {pickKey && (
-            <div className="sb-legend" style={{ justifyContent: "flex-end" }}>
+            <>
               <select value={key ? keyName(key) : ""} onChange={(e) => { const v = e.target.value; setKeyOverride(v); lsSet("songbook_key_" + chartId, v); setPickKey(false); }}>
                 {KEY_LIST.flatMap((k) => [k, k + "m"]).map((k) => <option key={k} value={k}>{k}</option>)}
               </select>
               {keyOverride && <button className="sb-tool" onClick={() => { setKeyOverride(null); lsSet("songbook_key_" + chartId, null); setPickKey(false); }}>Reset to {detected ? detected.tonic : "?"}</button>}
-            </div>
+            </>
           )}
-          {prefs.legend && key && <div className="sb-legend">{keyLegend(key).map((l) => <span key={l.degree}><b>{l.degree}</b> = {l.name}</span>)}</div>}
-          {keyOverride && !pickKey && <div className="sb-muted" style={{ marginTop: 4 }}>key set manually</div>}
           {isTeacher && (
-            <div className="sb-capo">
+            <>
               <label className="sb-capo-lbl">Capo
                 <select value={capo.capo} onChange={(e) => setCapo({ ...capo, capo: Number(e.target.value) })} title="Full capo fret">
                   {Array.from({ length: MAX_FULL_CAPO + 1 }, (_, f) => f).map((f) => (
@@ -315,83 +625,85 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId,
               </label>
               <button className={"sb-tool" + (capo.cut ? " on" : "")} onClick={() => setCapo({ ...capo, cut: !capo.cut })}
                 title="Partial capo on the A, D and G strings, always two frets above the full capo">
-                Cut capo{capo.cut ? " · fret " + cutFret : ""}
+                Cut{capo.cut ? " · " + cutFret : ""}
               </button>
-            </div>
+            </>
           )}
+          {langs.length > 1 && langs.map((l) => (
+            <button key={l} className={"sb-tool" + (chart.lang === l ? " on" : "")} onClick={() => { const c = charts.find((x) => x.lang === l); if (c) onSwitchChart(c.id); }}>{l.toUpperCase()}</button>
+          ))}
+          {sameLang.length > 1 && sameLang.map((c, i) => (
+            <button key={c.id} className={"sb-tool" + (c.id === chartId ? " on" : "")} onClick={() => onSwitchChart(c.id)}>V{i + 1}</button>
+          ))}
+          <button className={"sb-tool" + (prefs.legend ? " on" : "")} onClick={() => setPrefs({ ...prefs, legend: !prefs.legend })}>Legend</button>
+          {chart.glossCount > 0 && <button className={"sb-tool" + (prefs.gloss !== false ? " on" : "")} onClick={() => setPrefs({ ...prefs, gloss: prefs.gloss === false })}>Gloss</button>}
+          {!chart.abbrevCollision && <button className={"sb-tool" + (prefs.roadmapFull ? " on" : "")} onClick={() => setPrefs({ ...prefs, roadmapFull: !prefs.roadmapFull })}>{prefs.roadmapFull ? "Full" : "Letters"}</button>}
+          <button className={"sb-tool" + (editing ? " on" : "")} onClick={() => setEditing((v) => !v)}>{editing ? "Done" : "Reorder"}</button>
+          {customOrder && <button className="sb-tool" onClick={() => { saveOrder(null); setCustomOrder(null); try { localStorage.removeItem("songbook_order_" + chartId); } catch (e) { /* ignore */ } }}>Reset order</button>}
+          {prefs.legend && key && keyLegend(key).map((l) => <span key={l.degree} className="sb-legend-i"><b>{l.degree}</b>={l.name}</span>)}
+          <span className="sb-bar-sp" />
         </div>
-      </div>
 
-      {showNotice && (
-        <div className="sb-notice">
-          <span>Auto-corrected from <b>{detected.relativeMinor}</b> to <b>{detected.tonic} major</b>. This chart leans on the 6- chord (the pattern Planning Center labels as minor) but its cadences land on {detected.tonic}.</span>
-          <button className="sb-tool" onClick={() => { setKeyOverride(detected.relativeMinor); lsSet("songbook_key_" + chartId, detected.relativeMinor); }}>Use {detected.relativeMinor}</button>
-          <button className="sb-tool" onClick={() => { setNoticeDismissed(true); lsSet("songbook_notice_" + chartId, true); }}>OK</button>
-        </div>
-      )}
-
-      <div className="sb-tools">
-        {langs.length > 1 && langs.map((l) => (
-          <button key={l} className={"sb-tool" + (chart.lang === l ? " on" : "")} onClick={() => { const c = charts.find((x) => x.lang === l); if (c) onSwitchChart(c.id); }}>{l.toUpperCase()}</button>
-        ))}
-        {sameLang.length > 1 && sameLang.map((c, i) => (
-          <button key={c.id} className={"sb-tool" + (c.id === chartId ? " on" : "")} onClick={() => onSwitchChart(c.id)}>Version {i + 1}{c.key ? " · " + c.key.tonic : ""}</button>
-        ))}
-        <button className={"sb-tool" + (prefs.legend ? " on" : "")} onClick={() => setPrefs({ ...prefs, legend: !prefs.legend })}>Legend</button>
-        {chart.glossCount > 0 && <button className={"sb-tool" + (prefs.gloss !== false ? " on" : "")} onClick={() => setPrefs({ ...prefs, gloss: prefs.gloss === false })}>Gloss</button>}
-        {!chart.abbrevCollision && <button className={"sb-tool" + (prefs.roadmapFull ? " on" : "")} onClick={() => setPrefs({ ...prefs, roadmapFull: !prefs.roadmapFull })}>{prefs.roadmapFull ? "Full labels" : "Letters"}</button>}
-        <button className={"sb-tool" + (editing ? " on" : "")} onClick={() => setEditing((v) => !v)}>{editing ? "Done" : "Reorder"}</button>
-        {customOrder && <button className="sb-tool" onClick={() => { saveOrder(null); setCustomOrder(null); try { localStorage.removeItem("songbook_order_" + chartId); } catch (e) { /* ignore */ } }}>Reset order</button>}
-      </div>
-
-      {navButtons}
-
-      <div className="sb-map">
-        {roadmap.map((r, i) => {
-          const b = r.block != null ? chart.blocks.find((x) => x.id === r.block) : null;
-          const label = b ? (useFull ? labelOf(b) : abbr.map[b.name]) : r.label;
-          return <span key={i} className={"sb-map-item" + (b ? "" : " x")}>{label}{r.times > 1 ? " ×" + r.times : ""}</span>;
-        })}
-      </div>
-
-      {cutOn && <div className="sb-cc-hint">Cut capo at fret {cutFret} (A, D and G strings{capo.capo > 0 ? ", two frets above the capo at " + capo.capo : ""}). Tap any chord to see whether it survives the capo.</div>}
-
-      {blockOrder.map((bid, idx) => {
-        const b = chart.blocks.find((x) => x.id === bid);
-        return (
-          <div className="sb-block" key={bid} data-idx={idx}>
-            <div className="sb-block-label">
-              {labelOf(b)}
-              {editing && (
-                <span className="sb-handle">
-                  <button onClick={() => move(idx, idx - 1)}>↑</button>
-                  <button onClick={() => move(idx, idx + 1)}>↓</button>
-                  <button onPointerDown={onPointerDown(idx)} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>☰</button>
-                </span>
-              )}
-            </div>
-            {b.lines.map((ln, li) => (
-              <div key={li}>
-                <div className="sb-line">
-                  {segmentsOf(ln).map((sg, si) => (
-                    <span className="sb-seg" key={si}>
-                      {sg.chord && cutOn
-                        ? <span className="sb-chord tappable" role="button" tabIndex={0}
-                            onClick={() => setTapped(sg.chord)}
-                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setTapped(sg.chord); } }}
-                            title={"Can " + sg.chord + " be played with the cut capo?"}>{chordText(sg.chord)}</span>
-                        : <span className="sb-chord">{sg.chord ? chordText(sg.chord) : ""}</span>}
-                      <span className="sb-txt">{sg.text}</span>
-                    </span>
-                  ))}
-                </div>
-                {ln.gloss && prefs.gloss !== false && <div className="sb-gloss">{ln.gloss}</div>}
-              </div>
-            ))}
+        {showNotice && (
+          <div className="sb-notice">
+            <span>Auto-corrected from <b>{detected.relativeMinor}</b> to <b>{detected.tonic} major</b>. This chart leans on the 6- chord (the pattern Planning Center labels as minor) but its cadences land on {detected.tonic}.</span>
+            <button className="sb-tool" onClick={() => { setKeyOverride(detected.relativeMinor); lsSet("songbook_key_" + chartId, detected.relativeMinor); }}>Use {detected.relativeMinor}</button>
+            <button className="sb-tool" onClick={() => { setNoticeDismissed(true); lsSet("songbook_notice_" + chartId, true); }}>OK</button>
           </div>
-        );
-      })}
-      {chart.notes.length > 0 && <div className="sb-muted">{chart.notes.join(" ")}</div>}
+        )}
+        {cutOn && <div className="sb-cc-hint">Cut capo at fret {cutFret} (A, D and G strings{capo.capo > 0 ? ", two frets above the capo at " + capo.capo : ""}). Tap any chord to see whether it survives the capo.</div>}
+      </div>
+
+      {/* The box the fit measures against: whatever the header left over. */}
+      <div className="sb-body" ref={bodyRef}>
+        <div className="sb-fit" ref={fitRef}>
+          <div className="sb-map">
+            {roadmap.map((r, i) => {
+              const b = r.block != null ? chart.blocks.find((x) => x.id === r.block) : null;
+              const label = b ? (useFull ? labelOf(b) : abbr.map[b.name]) : r.label;
+              return <span key={i} className={"sb-map-item" + (b ? "" : " x")}>{label}{r.times > 1 ? " ×" + r.times : ""}</span>;
+            })}
+          </div>
+
+          {blockOrder.map((bid, idx) => {
+            const b = chart.blocks.find((x) => x.id === bid);
+            return (
+              <div className="sb-block" key={bid} data-idx={idx} data-block={bid}>
+                <div className="sb-block-label">
+                  {labelOf(b)}
+                  {editing && (
+                    <span className="sb-handle">
+                      <button onClick={() => move(idx, idx - 1)}>↑</button>
+                      <button onClick={() => move(idx, idx + 1)}>↓</button>
+                      <button onPointerDown={onPointerDown(idx)} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>☰</button>
+                    </span>
+                  )}
+                </div>
+                {b.lines.map((ln, li) => (
+                  <div key={li}>
+                    <div className="sb-line">
+                      {segmentsOf(ln).map((sg, si) => (
+                        <span className="sb-seg" key={si}>
+                          {sg.chord && cutOn
+                            ? <span className="sb-chord tappable" role="button" tabIndex={0}
+                                onClick={() => setTapped(sg.chord)}
+                                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setTapped(sg.chord); } }}
+                                title={"Can " + sg.chord + " be played with the cut capo?"}>{chordText(sg.chord)}</span>
+                            : <span className="sb-chord">{sg.chord ? chordText(sg.chord) : ""}</span>}
+                          <span className="sb-txt">{sg.text}</span>
+                        </span>
+                      ))}
+                    </div>
+                    {ln.gloss && prefs.gloss !== false && <div className="sb-gloss">{ln.gloss}</div>}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+          {chart.notes.length > 0 && <div className="sb-muted">{chart.notes.join(" ")}</div>}
+        </div>
+      </div>
+
       {navButtons}
 
       {cutOn && tapped && <CutCapoPopup token={tapped} capoSetting={capo} onClose={() => setTapped(null)} />}
@@ -530,7 +842,7 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive }) {
     const navIndex = open.fromSet ? setSongs.findIndex((s) => s.entry === open.entry) : -1;
     const setNav = navIndex >= 0 ? { list: setSongs, index: navIndex } : null;
     return (
-      <><style>{S}</style><div className="sb">
+      <><style>{S}</style><div className="sb sb-fixed">
         <ChartView entry={open.entry} chartId={open.chartId} fromSet={open.fromSet} setNav={setNav} serviceTypeId={serviceId} prefs={prefs} setPrefs={setPrefs} onKeepAlive={onKeepAlive} isTeacher={isTeacher}
           onNavigate={(t) => setOpen({ entry: t.entry, chartId: t.chartId, fromSet: true })}
           onBack={() => setOpen(null)} onSwitchChart={(id) => setOpen({ ...open, chartId: id })} />
