@@ -119,6 +119,14 @@ export const capoFor = (key) => {
   return best;
 };
 
+// Key name transposed by `semitones` (negative = down), keeping the mode.
+// Used for the full-capo fingering key: capo 2 in A means playing G shapes.
+export const transposedKeyName = (key, semitones) => {
+  const pcOut = ((key.tonicPc + semitones) % 12 + 12) % 12;
+  const useFlats = /b/.test(key.tonic) || key.tonic === "F";
+  return pcToName(pcOut, useFlats) + (key.mode === "minor" ? "m" : "");
+};
+
 export const capoLabel = (key) => {
   const c = capoFor(key);
   if (!c || c.fret === 0) return "Key: " + keyName(key);

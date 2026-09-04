@@ -3,8 +3,10 @@ import library from "./library.json";
 import { buildSearchIndex, search } from "./search.js";
 import { matchSetItem, pickChart } from "./match.js";
 import { SERVICE_TYPES, STUDENT_SERVICE_IDS, defaultDateFor, readCachedSet, fetchSet, sameSongs } from "./setStore.js";
-import { toNashville, keyLegend, capoLabel, keyName, parseKeyName, KEY_LIST } from "./chords.js";
+import { toNashville, keyLegend, capoLabel, keyName, parseKeyName, transposedKeyName, KEY_LIST } from "./chords.js";
 import { abbreviationsFor } from "./sections.js";
+import { cutCapoVoicingsFor, normalizeCapoSetting, DEFAULT_CAPO } from "./cutcapoAdapter.js";
+import CutCapoDiagram from "./CutCapoDiagram.jsx";
 
 // ============================================================
 // STORAGE — songbook_ keys only. Never touches c5Log.
@@ -67,6 +69,26 @@ const S = `
 .sb-txt{font-size:18px;color:#fff;min-height:22px;}
 .sb-gloss{font-size:12px;color:#7a7a99;letter-spacing:.5px;margin:0 0 8px;text-transform:uppercase;}
 .sb-empty{color:#8888aa;font-size:14px;padding:20px 0;text-align:center;}
+/* capo control + cut-capo chord popup (teacher only) */
+.sb-capo{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end;margin-top:6px;}
+.sb-capo select{padding:5px 8px;font-size:13px;}
+.sb-chord.tappable{cursor:pointer;}
+.sb-chord.tappable:hover{text-decoration:underline;}
+.sb-cc-hint{font-size:12px;color:#8888aa;margin:-4px 0 10px;}
+.sb-modal{position:fixed;inset:0;background:rgba(0,0,0,.82);display:flex;align-items:flex-end;justify-content:center;z-index:500;}
+.sb-sheet{background:#0e0e16;border:1.5px solid #2a2a40;border-radius:16px 16px 0 0;width:100%;max-width:560px;max-height:86vh;overflow-y:auto;padding:16px 16px 26px;}
+@media (min-width:600px){.sb-modal{align-items:center;}.sb-sheet{border-radius:16px;}}
+.sb-sheet-top{display:flex;align-items:baseline;gap:10px;margin-bottom:4px;}
+.sb-sheet-name{font-family:'Oswald',sans-serif;font-size:24px;font-weight:700;color:var(--gold,#f0c040);letter-spacing:1px;}
+.sb-sheet-sub{font-size:13px;color:#8888aa;}
+.sb-sheet-close{margin-left:auto;background:none;border:1px solid #2a2a40;color:#bbb;border-radius:9px;padding:5px 11px;font-size:14px;cursor:pointer;}
+.sb-cc-card{border:1px solid #2a2a40;border-radius:12px;padding:10px 10px 6px;margin-top:12px;background:#0a0a10;}
+.sb-cc-card-top{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#8888aa;margin-bottom:6px;}
+.sb-cc-notes{font-family:'Oswald',sans-serif;font-size:14px;color:#e8e8f0;letter-spacing:1px;}
+.sb-cc-no{background:rgba(239,83,80,.1);border:1.5px solid #7a2c2a;border-radius:12px;padding:14px;margin-top:12px;}
+.sb-cc-no-head{font-family:'Oswald',sans-serif;font-size:19px;color:#ff8a80;letter-spacing:1px;margin-bottom:5px;}
+.sb-cc-no-body{font-size:14px;color:#e8c4c2;line-height:1.45;}
+.sb-cc-warn{font-size:12px;color:#e0b050;background:rgba(240,192,64,.08);border:1px solid rgba(240,192,64,.3);border-radius:9px;padding:7px 9px;margin-top:10px;line-height:1.4;}
 @media (max-width:480px){.sb-chord{font-size:18px;}.sb-txt{font-size:16px;}.sb-title{font-size:19px;}}
 `;
 
@@ -90,7 +112,7 @@ const segmentsOf = (line) => {
 // ============================================================
 // CHART VIEW
 // ============================================================
-function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchChart, prefs, setPrefs, onKeepAlive }) {
+function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchChart, prefs, setPrefs, onKeepAlive, isTeacher }) {
   const chart = library.charts[chartId];
   const detected = chart.key;
   const [keyOverride, setKeyOverride] = useState(() => lsGet("songbook_key_" + chartId, null));
@@ -98,9 +120,12 @@ function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchCha
   const [customOrder, setCustomOrder] = useState(() => lsGet("songbook_order_" + chartId, null));
   const [editing, setEditing] = useState(false);
   const [pickKey, setPickKey] = useState(false);
+  // Cut capo is Nicole's own tool: teacher only, never offered to students.
+  const [capo, setCapoState] = useState(() => normalizeCapoSetting(lsGet("songbook_capo_" + chartId, null)));
+  const [tapped, setTapped] = useState(null); // chord token whose popup is open
   const dragRef = useRef(null);
 
-  useEffect(() => { setKeyOverride(lsGet("songbook_key_" + chartId, null)); setNoticeDismissed(lsGet("songbook_notice_" + chartId, false)); setCustomOrder(lsGet("songbook_order_" + chartId, null)); setEditing(false); setPickKey(false); }, [chartId]);
+  useEffect(() => { setKeyOverride(lsGet("songbook_key_" + chartId, null)); setNoticeDismissed(lsGet("songbook_notice_" + chartId, false)); setCustomOrder(lsGet("songbook_order_" + chartId, null)); setCapoState(normalizeCapoSetting(lsGet("songbook_capo_" + chartId, null))); setEditing(false); setPickKey(false); setTapped(null); }, [chartId]);
   // Keep the app's inactivity timer from blanking a chart that is open on stage.
   useEffect(() => { if (!onKeepAlive) return; const t = setInterval(onKeepAlive, 60 * 1000); return () => clearInterval(t); }, [onKeepAlive]);
 
@@ -124,7 +149,27 @@ function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchCha
   const useFull = prefs.roadmapFull || chart.abbrevCollision;
   const labelOf = (b) => b.name;
 
+  const setCapo = (next) => { const v = normalizeCapoSetting(next); setCapoState(v); lsSet("songbook_capo_" + chartId, v); if (v.mode !== "cut") setTapped(null); };
+  // Students never get cut capo, so a stale saved setting cannot leak into their view.
+  const cutCapoMode = isTeacher && capo.mode === "cut";
+
+  // Header key label. A full capo shows the fingering key in parentheses; a cut
+  // capo deliberately does not, because it raises only three strings and does
+  // not transpose the instrument, so no single fingering key would be true.
+  const keyHeader = () => {
+    if (!key) return "Key: ?";
+    if (cutCapoMode) return "Key: " + keyName(key) + " - Cut capo";
+    if (isTeacher && capo.mode === "full") {
+      return capo.fret > 0
+        ? "Key: " + keyName(key) + " - Capo " + capo.fret + " (" + transposedKeyName(key, -capo.fret) + ")"
+        : "Key: " + keyName(key) + " - No capo";
+    }
+    if (isTeacher && capo.mode === "none") return "Key: " + keyName(key) + " - No capo";
+    return capoLabel(key);
+  };
+
   const showNotice = detected && detected.minorSurface && !noticeDismissed && !keyOverride;
+  // Nashville numbers are independent of the capo: a 1 is a 1 in every mode.
   const chordText = (tok) => {
     if (!key) return tok;
     const n = toNashville(tok, key);
@@ -154,7 +199,7 @@ function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchCha
           <div className="sb-meta">{chart.artist}{chart.tempo ? " · " + chart.tempo + " bpm" : ""}{chart.time ? " · " + chart.time : ""}</div>
         </div>
         <div className="sb-key">
-          <button className="sb-key-main" onClick={() => setPickKey((v) => !v)} title="Tap to change key">{key ? capoLabel(key) : "Key: ?"}</button>
+          <button className="sb-key-main" onClick={() => setPickKey((v) => !v)} title="Tap to change key">{keyHeader()}</button>
           {pickKey && (
             <div className="sb-legend" style={{ justifyContent: "flex-end" }}>
               <select value={key ? keyName(key) : ""} onChange={(e) => { const v = e.target.value; setKeyOverride(v); lsSet("songbook_key_" + chartId, v); setPickKey(false); }}>
@@ -165,6 +210,20 @@ function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchCha
           )}
           {prefs.legend && key && <div className="sb-legend">{keyLegend(key).map((l) => <span key={l.degree}><b>{l.degree}</b> = {l.name}</span>)}</div>}
           {keyOverride && !pickKey && <div className="sb-muted" style={{ marginTop: 4 }}>key set manually</div>}
+          {isTeacher && (
+            <div className="sb-capo">
+              <select value={capo.mode} onChange={(e) => setCapo({ mode: e.target.value, fret: e.target.value === "cut" ? 2 : capo.fret })} title="Capo mode">
+                <option value="none">No capo</option>
+                <option value="full">Full capo</option>
+                <option value="cut">Cut capo</option>
+              </select>
+              {capo.mode === "full" && (
+                <select value={capo.fret} onChange={(e) => setCapo({ mode: "full", fret: Number(e.target.value) })} title="Capo fret">
+                  {[0, 1, 2, 3, 4, 5, 6, 7].map((f) => <option key={f} value={f}>{f === 0 ? "fret 0" : "fret " + f}</option>)}
+                </select>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -198,6 +257,8 @@ function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchCha
         })}
       </div>
 
+      {cutCapoMode && <div className="sb-cc-hint">Cut capo at fret 2 (A, D and G strings). Tap any chord to see whether it survives the capo.</div>}
+
       {blockOrder.map((bid, idx) => {
         const b = chart.blocks.find((x) => x.id === bid);
         return (
@@ -217,7 +278,12 @@ function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchCha
                 <div className="sb-line">
                   {segmentsOf(ln).map((sg, si) => (
                     <span className="sb-seg" key={si}>
-                      <span className="sb-chord">{sg.chord ? chordText(sg.chord) : ""}</span>
+                      {sg.chord && cutCapoMode
+                        ? <span className="sb-chord tappable" role="button" tabIndex={0}
+                            onClick={() => setTapped(sg.chord)}
+                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setTapped(sg.chord); } }}
+                            title={"Can " + sg.chord + " be played with the cut capo?"}>{chordText(sg.chord)}</span>
+                        : <span className="sb-chord">{sg.chord ? chordText(sg.chord) : ""}</span>}
                       <span className="sb-txt">{sg.text}</span>
                     </span>
                   ))}
@@ -229,6 +295,65 @@ function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchCha
         );
       })}
       {chart.notes.length > 0 && <div className="sb-muted">{chart.notes.join(" ")}</div>}
+
+      {cutCapoMode && tapped && <CutCapoPopup token={tapped} onClose={() => setTapped(null)} />}
+    </div>
+  );
+}
+
+// ============================================================
+// CUT CAPO POPUP — the question this feature exists to answer:
+// does this chord survive the cut capo, yes or no?
+// ============================================================
+function CutCapoPopup({ token, onClose }) {
+  const result = useMemo(() => cutCapoVoicingsFor(token, 2), [token]);
+  return (
+    <div className="sb-modal" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="sb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sb-sheet-top">
+          <span className="sb-sheet-name">{result.label || token}</span>
+          <span className="sb-sheet-sub">cut capo · fret 2 · A D G</span>
+          <button className="sb-sheet-close" onClick={onClose}>Close</button>
+        </div>
+
+        {result.status === "not-a-chord" && (
+          <div className="sb-cc-no">
+            <div className="sb-cc-no-head">Not a chord</div>
+            <div className="sb-cc-no-body">“{token}” is not something the cut capo can be checked against.</div>
+          </div>
+        )}
+
+        {result.status === "unplayable" && (
+          <div className="sb-cc-no">
+            <div className="sb-cc-no-head">Not playable with the cut capo</div>
+            <div className="sb-cc-no-body">
+              Remove the capo for this song.
+              {result.missing && result.missing.length > 0 && (
+                <> The closest shape drops {result.missing.join(" and ")}, so it is not really {result.label}.</>
+              )}
+            </div>
+          </div>
+        )}
+
+        {result.status === "ok" && (
+          <>
+            {result.reduced && <div className="sb-cc-warn">Shown as the nearest chord the cut-capo engine models; added colour tones are not drawn.</div>}
+            {result.voicings.map((v, i) => (
+              <div className="sb-cc-card" key={i}>
+                <div className="sb-cc-card-top">
+                  <span>{i === 0 ? "Best shape" : "Alternative"}</span>
+                  <span>{v.openCount} ringing · {v.frettedCount === 0 ? "no fingers" : v.frettedCount + " fingered"}{v.span > 0 ? " · " + (v.span + 1) + "-fret span" : ""}</span>
+                </div>
+                <CutCapoDiagram shape={v.shape} />
+                <div className="sb-cc-card-top" style={{ marginTop: 6 }}>
+                  <span>Notes low→high</span>
+                  <span className="sb-cc-notes">{v.notes.join(" · ")}</span>
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -290,7 +415,7 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive }) {
   if (open) {
     return (
       <><style>{S}</style><div className="sb">
-        <ChartView entry={open.entry} chartId={open.chartId} fromSet={open.fromSet} serviceTypeId={serviceId} prefs={prefs} setPrefs={setPrefs} onKeepAlive={onKeepAlive}
+        <ChartView entry={open.entry} chartId={open.chartId} fromSet={open.fromSet} serviceTypeId={serviceId} prefs={prefs} setPrefs={setPrefs} onKeepAlive={onKeepAlive} isTeacher={isTeacher}
           onBack={() => setOpen(null)} onSwitchChart={(id) => setOpen({ ...open, chartId: id })} />
       </div></>
     );
