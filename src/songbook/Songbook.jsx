@@ -90,6 +90,15 @@ const S = `
 .sb-cc-no-head{font-family:'Oswald',sans-serif;font-size:19px;color:#ff8a80;letter-spacing:1px;margin-bottom:5px;}
 .sb-cc-no-body{font-size:14px;color:#e8c4c2;line-height:1.45;}
 .sb-cc-warn{font-size:12px;color:#e0b050;background:rgba(240,192,64,.08);border:1px solid rgba(240,192,64,.3);border-radius:9px;padding:7px 9px;margin-top:10px;line-height:1.4;}
+/* set navigation — one gesture to the next song, on stage, mid-song */
+.sb-swipe{touch-action:pan-y;}
+.sb-pos{display:inline-block;font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:1px;color:#8888aa;border:1px solid #2a2a40;border-radius:8px;padding:2px 8px;margin-bottom:4px;}
+.sb-nav{display:flex;gap:10px;align-items:stretch;margin:14px 0 4px;}
+.sb-nav button{flex:1;min-height:64px;border:1.5px solid #2a2a40;background:#0e0e16;color:var(--gold,#f0c040);border-radius:14px;font-family:'Oswald',sans-serif;font-size:17px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;padding:10px 14px;display:flex;flex-direction:column;justify-content:center;gap:2px;}
+.sb-nav button:disabled{opacity:.3;color:#8888aa;cursor:default;}
+.sb-nav-next{align-items:flex-end;text-align:right;}
+.sb-nav-prev{align-items:flex-start;text-align:left;}
+.sb-nav-song{font-family:'Source Sans 3',sans-serif;font-size:13px;letter-spacing:0;text-transform:none;color:#8888aa;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 @media (max-width:480px){.sb-chord{font-size:18px;}.sb-txt{font-size:16px;}.sb-title{font-size:19px;}}
 `;
 
@@ -113,7 +122,7 @@ const segmentsOf = (line) => {
 // ============================================================
 // CHART VIEW
 // ============================================================
-function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchChart, prefs, setPrefs, onKeepAlive, isTeacher }) {
+function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId, onBack, onSwitchChart, prefs, setPrefs, onKeepAlive, isTeacher }) {
   const chart = library.charts[chartId];
   const detected = chart.key;
   const [keyOverride, setKeyOverride] = useState(() => lsGet("songbook_key_" + chartId, null));
@@ -189,14 +198,96 @@ function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchCha
   };
   const onPointerUp = () => { dragRef.current = null; };
 
+  // ----------------------------------------------------------
+  // SET NAVIGATION — on stage, both hands on the guitar. One
+  // gesture to the next song; buttons and arrow keys as backup.
+  // Only inside a set: from search there is no next song.
+  // ----------------------------------------------------------
+  const nav = fromSet && setNav && setNav.list.length > 1 ? setNav : null;
+  const navIdx = nav ? nav.index : -1;
+  const prevSong = nav && navIdx > 0 ? nav.list[navIdx - 1] : null;
+  const nextSong = nav && navIdx >= 0 && navIdx < nav.list.length - 1 ? nav.list[navIdx + 1] : null;
+
+  // No wrap: at the ends these are simply no-ops, never a jump to the
+  // other end of the set, which is disorienting mid-service.
+  const go = useCallback((dir) => {
+    if (!nav || editing) return;
+    const target = dir > 0 ? nav.list[navIdx + 1] : nav.list[navIdx - 1];
+    if (!target) return;
+    setTapped(null);
+    setPickKey(false);
+    onNavigate(target);
+    // Instant, like turning a page: chart data is already local.
+    window.scrollTo(0, 0);
+  }, [nav, navIdx, editing, onNavigate]);
+
+  // Pointer events, not touch events: the same code path serves the
+  // iPad on stage and a mouse on the laptop while testing.
+  const swipeRef = useRef(null);
+  const SWIPE_MIN = 60;      // px of horizontal travel before it counts
+  const SWIPE_RATIO = 1.5;   // must be this much more horizontal than vertical
+
+  // A gesture that starts in one of these is that control's own gesture.
+  const inExempt = (el) => !!(el && el.closest && el.closest(".sb-modal, .sb-handle, input, textarea, select, button, [role=button]"));
+
+  const onSwipeDown = (e) => {
+    if (!nav || editing || inExempt(e.target)) { swipeRef.current = null; return; }
+    swipeRef.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
+  };
+  // Deliberately no preventDefault here: vertical scrolling must stay
+  // completely untouched, and touch-action:pan-y leaves panning to Safari.
+  const onSwipeMove = () => {};
+  const onSwipeEnd = (e) => {
+    const s = swipeRef.current;
+    swipeRef.current = null;
+    if (!s || s.id !== e.pointerId) return;
+    const dx = e.clientX - s.x;
+    const dy = e.clientY - s.y;
+    if (Math.abs(dx) < SWIPE_MIN) return;                     // too short — a tap or a scroll
+    if (Math.abs(dx) < SWIPE_RATIO * Math.abs(dy)) return;    // too vertical — that was a scroll
+    go(dx < 0 ? 1 : -1);                                      // drag left = forward
+  };
+  const onSwipeCancel = () => { swipeRef.current = null; };
+
+  useEffect(() => {
+    if (!nav) return;
+    const onKey = (e) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      const t = e.target;
+      const tag = t && t.tagName ? t.tagName.toLowerCase() : "";
+      if (tag === "input" || tag === "textarea" || tag === "select" || (t && t.isContentEditable)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      e.preventDefault();
+      go(e.key === "ArrowRight" ? 1 : -1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [nav, go]);
+
+  const navButtons = nav ? (
+    <div className="sb-nav">
+      <button className="sb-nav-prev" disabled={!prevSong} onClick={() => go(-1)} aria-label="Previous song in the set">
+        <span>← Prev</span>
+        <span className="sb-nav-song">{prevSong ? prevSong.title : "First song"}</span>
+      </button>
+      <button className="sb-nav-next" disabled={!nextSong} onClick={() => go(1)} aria-label="Next song in the set">
+        <span>Next →</span>
+        <span className="sb-nav-song">{nextSong ? nextSong.title : "Last song"}</span>
+      </button>
+    </div>
+  ) : null;
+
   return (
-    <div className="sb-wrap">
+    <div className="sb-wrap sb-swipe"
+      onPointerDown={onSwipeDown} onPointerMove={onSwipeMove}
+      onPointerUp={onSwipeEnd} onPointerCancel={onSwipeCancel}>
       <div className="sb-top">
         <button className="sb-back" onClick={onBack}>← Back</button>
         <h1>{fromSet ? "This Week" : "Library"}</h1>
       </div>
       <div className="sb-chart-head">
         <div>
+          {nav && <div className="sb-pos">{navIdx + 1} / {nav.list.length}</div>}
           <div className="sb-title">{chart.lang === "pt" ? (chart.ptName || chart.names.primary) : (chart.enName || chart.names.primary)}</div>
           {(chart.lang === "pt" ? chart.enName : chart.ptName) && <div className="sb-alt">{chart.lang === "pt" ? chart.enName : chart.ptName}</div>}
           <div className="sb-meta">{chart.artist}{chart.tempo ? " · " + chart.tempo + " bpm" : ""}{chart.time ? " · " + chart.time : ""}</div>
@@ -253,6 +344,8 @@ function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchCha
         {customOrder && <button className="sb-tool" onClick={() => { saveOrder(null); setCustomOrder(null); try { localStorage.removeItem("songbook_order_" + chartId); } catch (e) { /* ignore */ } }}>Reset order</button>}
       </div>
 
+      {navButtons}
+
       <div className="sb-map">
         {roadmap.map((r, i) => {
           const b = r.block != null ? chart.blocks.find((x) => x.id === r.block) : null;
@@ -299,6 +392,7 @@ function ChartView({ entry, chartId, fromSet, serviceTypeId, onBack, onSwitchCha
         );
       })}
       {chart.notes.length > 0 && <div className="sb-muted">{chart.notes.join(" ")}</div>}
+      {navButtons}
 
       {cutOn && tapped && <CutCapoPopup token={tapped} capoSetting={capo} onClose={() => setTapped(null)} />}
     </div>
@@ -422,10 +516,23 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive }) {
   const results = useMemo(() => search(index, query), [index, query]);
   const service = SERVICE_TYPES.find((s) => s.id === serviceId);
 
+  // The songs of the set that actually have a chart, in the sequence order
+  // the endpoint returned. This is what prev/next walks; songs with no chart
+  // in the library are skipped, since there is nothing to open for them.
+  const setSongs = useMemo(() => items
+    .map((it) => { const e = it.match.entry; const c = e && pickChart(e, library, serviceId); return c ? { entry: e, chartId: c.id, title: it.match.title } : null; })
+    .filter(Boolean),
+    [items, serviceId]);
+
   if (open) {
+    // Position is found by entry, so switching language/version inside a song
+    // keeps the same slot in the set.
+    const navIndex = open.fromSet ? setSongs.findIndex((s) => s.entry === open.entry) : -1;
+    const setNav = navIndex >= 0 ? { list: setSongs, index: navIndex } : null;
     return (
       <><style>{S}</style><div className="sb">
-        <ChartView entry={open.entry} chartId={open.chartId} fromSet={open.fromSet} serviceTypeId={serviceId} prefs={prefs} setPrefs={setPrefs} onKeepAlive={onKeepAlive} isTeacher={isTeacher}
+        <ChartView entry={open.entry} chartId={open.chartId} fromSet={open.fromSet} setNav={setNav} serviceTypeId={serviceId} prefs={prefs} setPrefs={setPrefs} onKeepAlive={onKeepAlive} isTeacher={isTeacher}
+          onNavigate={(t) => setOpen({ entry: t.entry, chartId: t.chartId, fromSet: true })}
           onBack={() => setOpen(null)} onSwitchChart={(id) => setOpen({ ...open, chartId: id })} />
       </div></>
     );
