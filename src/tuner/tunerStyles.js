@@ -116,4 +116,8 @@ export const TUNER_CSS = `
   .tn-action{font-size:17px;}
   .tn-headstock{width:42%;}
 }
+
+.tn-tapwake{display:block;width:100%;margin:10px 0;padding:12px 14px;border-radius:10px;
+  border:1px solid #7a5a10;background:#2a1f05;color:#f0c040;font-size:14px;font-family:inherit;
+  text-align:left;cursor:pointer;min-height:44px;}
 `;

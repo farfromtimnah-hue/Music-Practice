@@ -38,6 +38,10 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
   const [lockedIndex, setLockedIndex] = useState(-1); // manual override
   const [listening, setListening] = useState(true);   // false while a tone plays
   const [diag, setDiag] = useState({ frequency: null, clarity: null, ok: false });
+  // iOS may hand back a SUSPENDED AudioContext: the mic is granted (the
+  // recording indicator lights) but no samples ever arrive. Track that
+  // separately from "muted" so the UI can say which one is happening.
+  const [needsTap, setNeedsTap] = useState(false);
 
   const audioRef = useRef(null);
   // Set true once the tuner is torn down. getUserMedia is async, so a stream
@@ -120,6 +124,7 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
       // stays on until the page is refreshed.
       if (deadRef.current) { audio.stop(); return; }
       audioRef.current = audio;
+      setNeedsTap(!audio.isRunning);
       setStatus("running");
       rafRef.current = requestAnimationFrame(loop);
     } catch (err) {
@@ -139,6 +144,24 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
     setReading(null);
     setListening(true);
   }, []);
+
+  /* iOS only honours AudioContext.resume() inside a real gesture handler,
+     and the mount-time start() is not one. Retry on the next genuine tap
+     anywhere in the tuner, then stop listening once audio is flowing. */
+  useEffect(() => {
+    if (!needsTap) return undefined;
+    const onGesture = async () => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      if (await audio.ensureRunning()) setNeedsTap(false);
+    };
+    window.addEventListener("pointerdown", onGesture);
+    window.addEventListener("touchend", onGesture);
+    return () => {
+      window.removeEventListener("pointerdown", onGesture);
+      window.removeEventListener("touchend", onGesture);
+    };
+  }, [needsTap]);
 
   /* Mic is requested when the tuner opens, and released on the way out —
      never held open in the background. */
@@ -414,6 +437,18 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
               this mode is for testing.
             </div>
           )}
+          {needsTap && (
+            <button
+              type="button"
+              className="tn-tapwake"
+              onClick={async () => {
+                const audio = audioRef.current;
+                if (audio && (await audio.ensureRunning())) setNeedsTap(false);
+              }}
+            >
+              Microphone is on but no audio is reaching the tuner — tap to enable
+            </button>
+          )}
           <div className="tn-diag">
             <div className="tn-diag-row">
               <span>Detected</span>
@@ -432,6 +467,12 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
             <div className="tn-diag-row">
               <span>Mic</span>
               <strong>{listening ? "open" : "muted"}</strong>
+            </div>
+            <div className="tn-diag-row">
+              <span>Audio</span>
+              <strong className={needsTap ? "no" : "ok"}>
+                {needsTap ? "suspended" : "running"}
+              </strong>
             </div>
           </div>
         </div>

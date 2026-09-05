@@ -87,10 +87,18 @@ export class TunerAudio {
 
     const Ctx = window.AudioContext || window.webkitAudioContext;
     this.ctx = new Ctx();
-    // Safari/iOS hands back a suspended context until a gesture resumes it.
-    if (this.ctx.state === "suspended") {
-      try { await this.ctx.resume(); } catch { /* resumed on first tap instead */ }
-    }
+    // Safari/iOS hands back a SUSPENDED context and only accepts resume()
+    // from inside a real user-gesture handler. This call sits after an
+    // awaited getUserMedia, which iOS no longer counts as a gesture, so it
+    // can reject here — and a suspended context still grants the mic, so
+    // the recording indicator lights while getFloatTimeDomainData returns
+    // pure silence for ever. That failure is invisible: the tuner looks
+    // live and simply never detects anything.
+    //
+    // So this attempt is best-effort only. `ensureRunning()` below is
+    // called again from a genuine tap, and `isRunning` lets the UI tell
+    // "mic muted" apart from "context suspended".
+    await this.ensureRunning();
 
     this.source = this.ctx.createMediaStreamSource(this.stream);
 
@@ -123,6 +131,27 @@ export class TunerAudio {
 
   get sampleRate() {
     return this.ctx ? this.ctx.sampleRate : 48000;
+  }
+
+  /** True once audio is actually flowing, not merely permitted. */
+  get isRunning() {
+    return !!this.ctx && this.ctx.state === "running";
+  }
+
+  /**
+   * Resume the AudioContext. Safe to call repeatedly, and MUST be called
+   * synchronously from inside a real tap handler on iOS — that is the only
+   * moment Safari will honour it.
+   */
+  async ensureRunning() {
+    if (!this.ctx) return false;
+    if (this.ctx.state === "running") return true;
+    try {
+      await this.ctx.resume();
+    } catch {
+      // Not a gesture. Caller retries from the next real tap.
+    }
+    return this.ctx.state === "running";
   }
 
   /**
