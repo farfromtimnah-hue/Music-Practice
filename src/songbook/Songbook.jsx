@@ -6,7 +6,6 @@ import { SERVICE_TYPES, STUDENT_SERVICE_IDS, defaultDateFor, readCachedSet, fetc
 import { toNashville, keyLegend, capoLabel, keyName, parseKeyName, transposedKeyName, transposeChordToken, pcToName, KEY_LIST } from "./chords.js";
 import { abbreviationsFor } from "./sections.js";
 import { readOverride, writeOverride, clearOverride, readKeyOverride, writeKeyOverride, clearKeyOverrides, migrateRelativeMinorKey, readChartKeyOverride, basisOf, basisDiffers } from "./overrideStore.js";
-import { collapseVariants, noteTextFor } from "./variants.js";
 import {
   cutCapoAnswerFor, normalizeCapoSetting, cutFretOf, MAX_FULL_CAPO,
   savedShapesFor, saveShapeFor, deleteSavedShape, analyseShape,
@@ -95,16 +94,8 @@ const S = `
    of the width is wasted and the fit has to shrink the type to compensate.
    Columns turn that wasted width back into font size: the same song at twice
    the point size. Blocks never break across a column, for the same reason
-   they never break across a page.
-
-   column-fill is balance rather than auto: with auto the browser fills each
-   column to the full height before starting the next, so the whole leftover gap
-   lands in the last column. Balanced, the same leftover is shared out and the
-   page reads as one block of type instead of a wall with a hole at the end.
-   Measured, it does not change the point size the fit can reach — the element
-   is pinned to the box height, which leaves the browser nothing to redistribute
-   — but it is the honest declaration of intent and it looks better for free. */
-.sb-fit{--sbfs:18px;--sbcols:1;font-size:var(--sbfs);column-count:var(--sbcols);column-gap:1.6em;column-fill:balance;}
+   they never break across a page. */
+.sb-fit{--sbfs:18px;--sbcols:1;font-size:var(--sbfs);column-count:var(--sbcols);column-gap:1.6em;column-fill:auto;}
 .sb-fit>*{break-inside:avoid;-webkit-column-break-inside:avoid;}
 /* A song that does not fill the height sits in the middle of the space rather
    than clinging to the top — done by the flex box above, so there is no state
@@ -139,25 +130,6 @@ const S = `
 .sb-map .sb-map-item.x{color:#5d6f95;border-style:dashed;}
 .sb-block{margin:0 0 .85em;border-left:3px solid #14213d;padding-left:.55em;position:relative;}
 .sb-block.drag{opacity:.5;}
-/* THE CHORUS IS WHAT THE EYE HUNTS FOR. It is the part that repeats, so
-   mid-song the question is always "where does the chorus start again" — and a
-   chorus used to look exactly like the verse above it.
-   THREE signals, none of them colour alone, because this is read under stage
-   lighting where colour is the first thing to go: a brighter, thicker accent
-   rail down the left; a faint tint behind the block; and a label that is
-   heavier and fully opaque against the muted verse labels.
-   COSTS NO VERTICAL SPACE — no extra padding, margin or rule. Space is the
-   scarce resource on this screen, and the whole point of the fit work above is
-   to spend it on point size. The rail replaces the existing one rather than
-   adding to it, and the tint sits behind text that was already there. */
-.sb-block-chorus{border-left-color:#f0c040;border-left-width:4px;background:rgba(240,192,64,.05);border-radius:0 6px 6px 0;}
-.sb-block-chorus>.sb-block-label{color:#f0c040;font-weight:600;letter-spacing:2.5px;}
-/* A repeated chorus. Quiet on purpose: it must read as "this again", never as
-   another section of the arrangement. The dashed rail is the signal that
-   survives stage lighting; the word is the confirmation. No extra vertical
-   space — the tag rides in the label row that was already there. */
-.sb-block-rpt{border-left-style:dashed;opacity:.94;}
-.sb-rpt-tag{font-family:'Source Sans 3',sans-serif;font-size:.82em;font-weight:400;letter-spacing:.4px;text-transform:none;color:#8a7a4e;border:1px solid #4a412a;border-radius:4px;padding:0 .35em;}
 .sb-block-label{font-family:'Oswald',sans-serif;font-size:.66em;letter-spacing:2px;text-transform:uppercase;color:#4a6da7;margin-bottom:.25em;display:flex;align-items:center;gap:8px;}
 /* A section borrowed from another song. Marked warm and edged so it can never
    be read as part of the host song at a glance from a music stand. */
@@ -181,16 +153,6 @@ const S = `
 .sb-seg{display:inline-flex;flex-direction:column;white-space:pre;}
 .sb-chord{font-family:'Oswald',sans-serif;font-weight:700;font-size:1.05em;color:var(--gold,#f0c040);min-height:1.2em;padding-right:.4em;line-height:1.15;}
 .sb-chord small{font-size:.62em;color:#c9b06a;font-weight:400;}
-/* A chord variant: "(Esus 2nd, 3rd time)" beside the chord it replaces.
-   Deliberately subordinate — smaller, lighter, unbolded, in a muted gold — so
-   the chord the player reads BY DEFAULT still wins the glance and the note is
-   only picked up when they are on that time through. Scales with --sbfs like
-   everything else, but with an 8px floor: proportional shrinking took it to
-   5.6px on the tightest song, which is subordinate to the point of being
-   unreadable. A note nobody can read is the same as no note. */
-.sb-var{font-family:'Source Sans 3',sans-serif;font-size:max(8px,.58em);font-weight:400;color:#b99a52;letter-spacing:0;padding-left:.25em;white-space:nowrap;}
-/* The whole-line form, for a line whose chord COUNT changes between times. */
-.sb-var-line{font-family:'Source Sans 3',sans-serif;font-size:max(8px,.6em);color:#b99a52;letter-spacing:.3px;margin:0 0 .2em;}
 .sb-txt{font-size:1em;color:#fff;min-height:1.15em;line-height:1.2;}
 .sb-gloss{font-size:.72em;color:#9a9ac0;letter-spacing:.5px;margin:0 0 .28em;text-transform:uppercase;line-height:1.15;}
 .sb-empty{color:#8888aa;font-size:14px;padding:20px 0;text-align:center;}
@@ -320,23 +282,6 @@ const segmentsOf = (line) => {
 // break the song into pages — at section boundaries, never mid-verse.
 // ============================================================
 const FIT_MIN = 8;    // px — below this it stops being readable on stage
-// Is this block a chorus — the thing that repeats and therefore the thing the
-// eye is hunting for mid-song?
-//
-// Matched on the block's BASE NAME, not an exact string, so "Chorus", "Chorus
-// 2", "Final Chorus", "Refrain" and the Portuguese "Refrão" all count. The
-// exclusions matter as much as the matches: a PRE-chorus is a build-up into the
-// chorus and a POST-chorus is the tail off it — neither is the landmark, and
-// there are 74 pre-chorus blocks in the library that a naive /chorus/ test
-// would light up, which would make the highlight meaningless.
-const CHORUS_RE = /^(?:final\s+)?(?:chorus|refrain|refr[ãa]o)\b/i;
-const PSEUDO_CHORUS_RE = /(?:^|\b)(?:pre|post)[\s-]*chorus\b|\bto\s+chorus\b/i;
-const isChorusBlock = (b) => {
-  const n = String((b && (b.baseName || b.name)) || "").trim();
-  if (!n || PSEUDO_CHORUS_RE.test(n)) return false;
-  return CHORUS_RE.test(n);
-};
-
 const FIT_MAX = 28;   // px — above this the type just looks broken
 const FIT_EPS = 0.25; // px — stop the binary search once this close
 
@@ -362,105 +307,11 @@ const fitFontSize = (el, availH, availW, cols) => {
   return { size: lo, overflow: false };
 };
 
-// How many chart lines have WRAPPED at the size and column count currently
-// applied.
-//
-// This is the measurement the old code never made. `scrollWidth <= availW`
-// only ever established that the whole thing fits the box; nothing asked
-// whether a column had become narrower than the lines it carries. When it has,
-// a .sb-line flex-wraps its segments onto a second row and every chord after
-// the break sits above the wrong syllable — the chart is still "fitting", and
-// it is also wrong, which is the worst way for it to fail on stage.
-//
-// Measured on .sb-line rather than on leaf text: a line is a flex row of
-// .sb-seg chunks, so the widest LEAF is just one syllable and says nothing
-// about whether the line as a whole fits. A line has wrapped exactly when its
-// segments occupy more than one vertical offset.
-const wrappedLineCount = (el) => {
-  let n = 0;
-  for (const ln of el.querySelectorAll(".sb-line")) {
-    const segs = ln.querySelectorAll(".sb-seg");
-    if (segs.length < 2) continue;
-    let top = null, wrapped = false;
-    for (const sg of segs) {
-      const t = Math.round(sg.getBoundingClientRect().top);
-      if (top === null) top = t;
-      else if (t !== top) { wrapped = true; break; }
-    }
-    if (wrapped) n++;
-  }
-  return n;
-};
-
-// How tall the tallest and shortest columns are, by grouping top-level blocks
-// on their x position. Used to reject a layout that fits only because one
-// column ran to the bottom while another trailed off early: that void is not
-// free, it is point size the search had to give up to accommodate it.
-const columnSpread = (el, cols, availW) => {
-  if (cols < 2) return { spread: 0, used: 1 };
-  const gap = parseFloat(getComputedStyle(el).columnGap) || 0;
-  const colW = (availW - gap * (cols - 1)) / cols;
-  const base = el.getBoundingClientRect().left;
-  const tops = new Array(cols).fill(Infinity);
-  const bots = new Array(cols).fill(-Infinity);
-  for (const b of el.children) {
-    if (b.style.display === "none") continue;
-    const r = b.getBoundingClientRect();
-    if (!r.height) continue;
-    let i = Math.round((r.left - base) / (colW + gap));
-    if (!(i >= 0)) i = 0;
-    if (i > cols - 1) i = cols - 1;
-    if (r.top < tops[i]) tops[i] = r.top;
-    if (r.bottom > bots[i]) bots[i] = r.bottom;
-  }
-  const hs = [];
-  for (let i = 0; i < cols; i++) if (bots[i] > -Infinity) hs.push(bots[i] - tops[i]);
-  if (!hs.length) return { spread: 0, used: 0 };
-  return { spread: Math.max(...hs) - Math.min(...hs), used: hs.length };
-};
-
-// A column narrower than this is not a chord chart any more, it is a word list
-// with the chords wrapped off their syllables. It stays as the FLOOR, but it is
-// no longer the only thing deciding the count: it is a fixed number that knows
-// nothing about how wide this particular song's lines are, and used as a cap it
-// was throwing away most of the available point size.
-// A hard floor, not a target: narrower than this and even short lines start
-// wrapping. The old code used 260 as BOTH the floor and the thing that decided
-// the column count, which is where the wasted space came from — 260 is a guess
-// about line width that no song was ever consulted about.
-const MIN_COL_W = 150;
-
-// `Math.min(3, ...)` meant a 1024px iPad could never try more than three
-// columns even when the song's lines were short enough to want more — and on a
-// chord chart the count IS the point size, because narrower columns mean more
-// of them and less vertical distance to cover. Measured on "Teu Toque" at
-// 1024x768: three columns fit 11.6px, four fit 13.9px. That 20% was being left
-// on the table by a constant. The real guard against over-splitting is not a
-// number here, it is the measured line width in bestFit, which rejects any
-// count whose columns are narrower than the song's own longest line.
-const MAX_COLS = 8;
-// The ceiling before this change, and still the ceiling for deciding whether a
-// song FITS AT ALL.
-//
-// Raising the cap is meant to give an already-fitting chart bigger type, never
-// to rescue a too-long song onto one screen. Left unchecked it did exactly
-// that: "Same God" and the medley used to paginate — 13.3px and 10.7px a page —
-// and eight columns crammed them onto one page at 9.3px, which is smaller type
-// AND loses the per-page chorus. So the fit test is asked at the old ceiling,
-// and the extra columns only ever compete to make a fitting song larger.
-const MAX_COLS_FIT = 3;
-// The smallest type a chart may be shown at on one page. A song that cannot
-// reach this within MAX_COLS_FIT has genuinely run out of single-page options
-// and is paginated — which is where its bigger type is.
-const FIT_READABLE = 10;
-
-// A repeated block's id on a page it does not natively belong to. Prefixed so
-// it can never collide with a real block id or be mistaken for one: it is the
-// same block, shown again, and must not gain a roadmap entry or a play count.
-const REPEAT_PREFIX = "rpt:";
-export const isRepeatId = (id) => typeof id === "string" && id.startsWith(REPEAT_PREFIX);
-export const baseIdOf = (id) => (isRepeatId(id) ? id.slice(REPEAT_PREFIX.length) : id);
-const maxColsFor = (availW) => Math.max(1, Math.min(MAX_COLS, Math.floor(availW / MIN_COL_W)));
+// How many columns the box can carry. A column narrower than this is not a
+// chord chart any more, it is a word list with the chords wrapped off their
+// syllables, so the count is capped by width, not by ambition.
+const MIN_COL_W = 260;
+const maxColsFor = (availW) => Math.max(1, Math.min(3, Math.floor(availW / MIN_COL_W)));
 
 // Try every column count and keep whichever gives the largest readable type.
 // One column always wins on a phone; two or three win on a laptop or a
@@ -471,124 +322,29 @@ const maxColsFor = (availW) => Math.max(1, Math.min(MAX_COLS, Math.floor(availW 
 // is about to paginate against. Leaving a losing single column applied here
 // is what makes a paginated song render clipped: the page budget assumes the
 // columns that the element was never actually given.
-// Points of font size one extra wrapped line has to be worth.
-//
-// Wrapping is priced rather than forbidden. A wrapped line is a real fault —
-// the chords after the break sit above the wrong syllables — but refusing to
-// wrap at all is worse: some songs have one stubborn long line, and holding the
-// wrap count at zero for its sake collapses the chart to two columns at 10px
-// when three would read 12.2px. Charging a third of a point per wrapped line
-// lets a layout buy a few wraps with a real size gain, while still ruling out
-// the counts that shatter the chart into slivers.
-//
-// Calibrated against "Teu Toque" at 1024x768, where the three candidates are
-// 2 columns at 10.0px with no wrapping, 3 at 12.2px with three, and 4 at
-// 15.2px with twelve. Half a point per line picks the middle one: the 22% gain
-// is worth three wrapped lines, the further 24% is not worth nine more.
-const WRAP_COST = 0.5;
-
-// How far apart the columns may end up before the layout counts as wasteful,
-// as a fraction of the box height. A quarter of the box standing empty is a
-// void you can see from the music stand, and it was paid for in point size.
-const MAX_SPREAD_FRAC = 0.25;
-
 const bestFit = (el, availH, availW) => {
   const maxCols = maxColsFor(availW);
   let best = null;
-  const cands = [];
   for (let c = 1; c <= maxCols; c++) {
     const r = fitFontSize(el, availH, availW, c);
-    if (r.overflow) {
-      if (!best) best = { ...r, cols: c, spread: 0, cramped: false };
-      continue;
-    }
-    // Does the content actually FIT this column, or is it wrapping? This is the
-    // failure MIN_COL_W was guarding against, and it is real: on "Teu Toque"
-    // four columns fit the box and read 20% larger while wrapping ten lines,
-    // which puts chords over the wrong syllables. Point size is worth a lot,
-    // but not a chart that lies about where the chord changes.
-    const wrapped = wrappedLineCount(el);
-    const { spread } = columnSpread(el, c, availW);
-    const cand = { ...r, cols: c, spread, wrapped };
-    // Rank on READABLE POINT SIZE first — that is the whole objective; the
-    // column count is only ever a means to it. A layout that wraps its lines
-    // is rejected outright, and between two layouts of near-equal size the one
-    // that leaves less of the box empty wins.
-    cands.push(cand);
-    if (!best || best.overflow || cand.size > best.size + 0.5) best = cand;
-    if (best && !best.overflow && !cand.wrapped && best.size >= FIT_MAX &&
-        best.spread <= availH * MAX_SPREAD_FRAC) break;
+    if (!best || (!r.overflow && (best.overflow || r.size > best.size + 0.5))) best = { ...r, cols: c };
+    if (best && !best.overflow && best.size >= FIT_MAX) break;
   }
-  // Choosing between layouts means trading point size against wrapped lines,
-  // and neither one wins outright.
-  //
-  // A wrapped line is a real fault: the chords after the break sit above the
-  // wrong syllables. But some songs have a line long enough to wrap at EVERY
-  // count, and refusing to wrap at all then collapses the chart to one column
-  // at 9px — measured on "Teu Toque" at 2048 wide, where holding the wrap
-  // count at its floor of 2 costs 16 points of type against the 3-column
-  // layout. Nobody is helped by an unwrapped chart they cannot read.
-  //
-  // So wrapping is PRICED rather than forbidden: each extra wrapped line has
-  // to buy its way in with point size. The exchange rate is deliberately steep
-  // — a whole point of type per wrapped line — so a layout only wraps more when
-  // it is dramatically bigger, never for a rounding difference.
-  // A song only counts as fitting if it fits within the OLD ceiling, AND does
-  // so at a size someone can read. The extra columns are a bonus for a chart
-  // that already fits, never a way to cram in one that does not.
-  //
-  // Both halves matter. "Same God" fits three columns at 9.25px — technically a
-  // fit, and unreadable at a music stand; it used to paginate at 13.3px a page.
-  // Reporting it as overflowing sends it back to the pagination it earned, and
-  // brings the per-page chorus with it. This is the ONLY thing that paginates a
-  // song: it is still last resort, reached after variants are collapsed, every
-  // column count is tried and the type is taken to the floor.
-  const fitsWithin = cands.filter((c) => !c.overflow && c.cols <= MAX_COLS_FIT);
-  if (!fitsWithin.some((c) => c.size >= FIT_READABLE)) {
-    return { ...fitFontSize(el, availH, availW, Math.min(MAX_COLS_FIT, maxCols)), cols: Math.min(MAX_COLS_FIT, maxCols), spread: 0, overflow: true };
-  }
-  let usable = cands.filter((c) => !c.overflow);
-  // A layout that only "fits" by shrinking below the comfort threshold is not
-  // a fit worth having: for a long song the caller's own pagination path gives
-  // bigger type on two pages than cramming the whole thing onto one. Measured
-  // on "Same God": four columns hold all 87 lines at 9.3px, while paginating
-  // reads 13.3px. So counts that land under the threshold are dropped, and the
-  // song is reported as overflowing — which is what sends it to be paginated,
-  // exactly as it was before the column cap was raised.
-  if (usable.length) {
-    const floor = Math.min(...usable.map((c) => c.wrapped));
-    const scored = usable.map((c) => ({ c, v: c.size - (c.wrapped - floor) * WRAP_COST }));
-    scored.sort((a, b) => (Math.abs(a.v - b.v) <= 0.5 ? a.c.spread - b.c.spread : b.v - a.v));
-    best = scored[0].c;
-  }
-  const cols = !best || best.overflow ? maxCols : best.cols;
+  const cols = best.overflow ? maxCols : best.cols;
   // Re-apply the winner: the loop left the element on the last count tried.
-  const applied = fitFontSize(el, availH, availW, cols);
-  return { ...applied, cols, spread: best ? best.spread : 0 };
+  return { ...fitFontSize(el, availH, availW, cols), cols };
 };
 
 // Split the block list into the fewest pages that each fit, balanced so the
 // last page is not a lonely orphan. Blocks are atomic: a verse or a chorus is
 // never cut in half, which is the whole point — a break inside a chorus is
 // worse than no break at all.
-// `repeatIds` are blocks that will be REPEATED on every page after the one
-// they belong to — the choruses. Their height is reserved on each page up
-// front, because a page packed to the brim and then given a chorus is a page
-// that renders clipped.
-const paginateBlocks = (host, ids, availH, cols, repeatIds) => {
+const paginateBlocks = (host, ids, availH, cols) => {
   // Measure at the minimum size in ONE column: a block's own height does not
   // depend on how many columns it will later be laid into, and the page
-  // budget is the column height multiplied by the column count. Measuring at
-  // FIT_MIN is what makes a page a LAST RESORT — the song has already been
-  // taken down to the smallest readable type before anyone asks about pages.
+  // budget is the column height multiplied by the column count.
   host.style.setProperty("--sbcols", 1);
   host.style.height = "";
-  // Measure at the FLOOR, always. This decides how MANY pages the song is cut
-  // into, and a page is a last resort: planning at any larger size multiplies
-  // the pages (the medley went to seven) for songs that never needed them. The
-  // separate question of WHETHER to paginate is answered in bestFit, which asks
-  // whether the song can be read on one page; this only answers, once that is
-  // settled, how few pages it can be split into.
   host.style.setProperty("--sbfs", FIT_MIN + "px");
   const els = ids.map((id) => host.querySelector('[data-block="' + id + '"]'));
   if (els.some((el) => !el)) return [ids];
@@ -618,35 +374,15 @@ const paginateBlocks = (host, ids, availH, cols, repeatIds) => {
   const budget = availH * cols * (cols > 1 ? 0.88 : 1);
   const minPages = pack(budget).length;
   if (minPages <= 1) return [ids];
-  // Room the repeated chorus will take on every page after the first. Reserved
-  // BEFORE packing, so adding the repeat cannot overflow a page that was
-  // measured without it.
-  const repeatH = (repeatIds || []).reduce((a, id) => {
-    const i = ids.indexOf(id);
-    return i < 0 ? a : a + heights[i];
-  }, 0);
   // Spread the song evenly over that page count instead of cramming the early
   // pages full and leaving the last one nearly empty — every page then has
   // room to scale its type up, which is the reason to paginate at all.
   const total = heights.reduce((a, b) => a + b, 0);
-  const withRepeat = Math.max(80, budget - repeatH);
-  const pages = (() => {
-    const n = pack(withRepeat).length;
-    for (let slack = 1.0; slack <= 1.5; slack += 0.05) {
-      const even = pack((total / n) * slack);
-      if (even.length === n) return even;
-    }
-    return pack(withRepeat);
-  })();
-  if (pages.length <= 1) return [ids];
-  // Put the choruses on every page that does not already carry them, in the
-  // song's own order, so the page reads the way the chart does. The repeat is
-  // never counted as another entry in the roadmap: `order` is untouched, and
-  // the marker on the block says it is a reprise rather than a new section.
-  return pages.map((pg) => {
-    const missing = (repeatIds || []).filter((id) => ids.includes(id) && !pg.includes(id));
-    return missing.length ? [...pg, ...missing.map((id) => REPEAT_PREFIX + id)] : pg;
-  });
+  for (let slack = 1.0; slack <= 1.5; slack += 0.05) {
+    const even = pack((total / minPages) * slack);
+    if (even.length === minPages) return even;
+  }
+  return pack(budget);
 };
 
 // ============================================================
@@ -943,56 +679,19 @@ function ChartView({ entry, chartId, fromSet, setNav, planKey, onNavigate, onLoa
     return b ? { ...b, inserted: false } : null;
   }, [chart, insertBlocks]);
 
-  // Blocks whose LYRICS repeat, collapsed to one printed copy with the chord
-  // differences annotated inline. Display only: `order` and the roadmap below
-  // still carry every occurrence, because the song really does play five
-  // choruses and the map has to say so.
-  const variantGroups = useMemo(() => collapseVariants(chart.blocks), [chart]);
-  // id -> the group it is folded into, for the ids that stop being printed.
-  const foldedAway = useMemo(() => {
-    const m = new Map();
-    for (const [baseId, info] of variantGroups) {
-      if (info.noisy) continue;   // too many notes to read: leave it expanded
-      info.ids.forEach((id, occ) => { if (id !== baseId) m.set(id, { baseId, occ }); });
-    }
-    return m;
-  }, [variantGroups]);
-
-  // The choruses, in song order — what gets repeated onto every page when the
-  // song splits. ALL distinct choruses, not just the first: mid-service the
-  // leader can go back to any of them, and a page carrying only one is a page
-  // where the wrong chorus is on screen. After variant collapsing this is
-  // usually a single block, so it costs very little.
-  const chorusIds = useMemo(
-    () => chart.blocks.filter((b) => isChorusBlock(b) && !foldedAway.has(b.id)).map((b) => b.id),
-    [chart, foldedAway]
-  );
-
   const blockOrder = useMemo(() => {
     const ids = chart.blocks.map((b) => b.id);
     const insIds = insertBlocks.map((b) => b.id);
     const all = [...ids, ...insIds];
     // No custom order yet: host blocks in file order, then anything inserted.
-    // A folded-away duplicate is not printed. It is still in `order`, so the
-    // roadmap and the play count are untouched.
-    const printable = (list) => list.filter((id) => !foldedAway.has(id));
-    if (!customOrder) return printable(all);
+    if (!customOrder) return all;
     // Keep only ids that still exist, then append anything new — a section
     // inserted while a custom order is in force appears at the end until she
     // moves it, rather than silently vanishing because the order predates it.
     const valid = customOrder.filter((id) => all.includes(id));
     all.forEach((id) => { if (!valid.includes(id)) valid.push(id); });
-    return printable(valid);
-  }, [chart, customOrder, insertBlocks, foldedAway]);
-
-  // The ids actually RENDERED: the running order, plus one repeat copy of each
-  // chorus. The copies sit at the end of the DOM and are shown only on the
-  // pages that need them, so a repeat costs nothing on a song that never
-  // paginates and never appears twice on one page.
-  const renderOrder = useMemo(
-    () => [...blockOrder, ...chorusIds.map((id) => REPEAT_PREFIX + id)],
-    [blockOrder, chorusIds]
-  );
+    return valid;
+  }, [chart, customOrder, insertBlocks]);
   const saveOrder = (ids) => { setCustomOrder(ids); lsSet("songbook_order_" + chartId, ids); };
   const move = (from, to) => { if (to < 0 || to >= blockOrder.length) return; const ids = blockOrder.slice(); const [x] = ids.splice(from, 1); ids.splice(to, 0, x); saveOrder(ids); };
 
@@ -1214,16 +913,10 @@ function ChartView({ entry, chartId, fromSet, setNav, planKey, onNavigate, onLoa
     let lastH = -1, lastW = -1;
 
     const blockEls = () => Array.from(host.querySelectorAll("[data-block]"));
-    // "All" means the whole SONG — never the repeat copies. A song that fits one
-    // page shows its chorus once, in place; the copies only exist for pages.
-    const showAll = () => blockEls().forEach((el) => {
-      el.style.display = el.dataset.repeat ? "none" : "";
+    const showAll = () => blockEls().forEach((el) => { el.style.display = ""; });
+    const showOnly = (ids) => blockEls().forEach((el) => {
+      el.style.display = ids.includes(Number(el.dataset.block)) ? "" : "none";
     });
-    // ids may contain repeat ids ("rpt:3"); dataset.block carries them verbatim.
-    const showOnly = (ids) => {
-      const want = new Set(ids.map(String));
-      blockEls().forEach((el) => { el.style.display = want.has(String(el.dataset.block)) ? "" : "none"; });
-    };
 
     // `passes` bounds the settle loop below. Two passes is always enough in
     // practice; the cap only exists so a pathological layout cannot spin.
@@ -1237,12 +930,6 @@ function ChartView({ entry, chartId, fromSet, setNav, planKey, onNavigate, onLoa
       const had = pagesRef.current;
       showAll();
       const whole = bestFit(host, availH, availW);
-      // A SECOND PAGE IS A LAST RESORT. Turning a page mid-song is disruptive,
-      // so the only thing that earns one is a song that genuinely will not fit
-      // at the minimum readable size — never a song that merely WOULD look
-      // better split. Every single-page option is exhausted before this point:
-      // variants collapsed, columns balanced, every column count tried, and the
-      // type taken down to FIT_MIN.
       if (!whole.overflow) {
         if (had) setPages(null);
         settle(availH, availW, passes);
@@ -1250,25 +937,7 @@ function ChartView({ entry, chartId, fromSet, setNav, planKey, onNavigate, onLoa
       }
 
       // It does not fit even at the minimum readable size, so it needs pages.
-      //
-      // Budget with MAX_COLS_FIT, not maxColsFor(availW). The page budget has
-      // to be the column count the page will actually be LAID OUT at, and a
-      // page is laid out by bestFit, whose fit test is the old ceiling. Budget
-      // for eight columns and hand the result to a three-column layout and the
-      // page holds nearly three times what it can show — which renders clipped,
-      // the one outcome this whole feature exists to prevent.
-      const pageCols = Math.min(MAX_COLS_FIT, maxColsFor(availW));
-      const split = paginateBlocks(host, blockOrder, availH, pageCols, chorusIds);
-
-      // A split of one page is not a split: fall back to the whole song rather
-      // than paginating into a single page that then hides the repeat copies.
-      if (split.length <= 1) {
-        showAll();
-        bestFit(host, availH, availW);
-        if (had) setPages(null);
-        settle(availH, availW, passes);
-        return;
-      }
+      const split = paginateBlocks(host, blockOrder, availH, maxColsFor(availW));
 
       let use = split;
       let shown = use[Math.min(pageRef.current, use.length - 1)] || blockOrder;
@@ -1277,7 +946,7 @@ function ChartView({ entry, chartId, fromSet, setNav, planKey, onNavigate, onLoa
       // harder rather than render a clipped chart. Clipped lyrics on stage are
       // the one outcome this whole feature exists to prevent.
       for (let tighten = 0; tighten < 3 && bestFit(host, availH, availW).overflow; tighten++) {
-        const tighter = paginateBlocks(host, blockOrder, availH * (0.8 - tighten * 0.15), pageCols, chorusIds);
+        const tighter = paginateBlocks(host, blockOrder, availH * (0.8 - tighten * 0.15), maxColsFor(availW));
         if (tighter.length <= use.length) break;
         use = tighter;
         shown = use[Math.min(pageRef.current, use.length - 1)] || blockOrder;
@@ -1327,7 +996,7 @@ function ChartView({ entry, chartId, fromSet, setNav, planKey, onNavigate, onLoa
     // setPages to an equal value is skipped above, and React drops a set to
     // the identical null — so this converges instead of spinning.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chartId, page, pages, blockOrder, renderOrder, chorusIds, insertBlocks, prefs.gloss, prefs.legend, prefs.roadmapFull, editing, capo.capo, capo.cut, keyOverride, chartKeyOverride, showNotice, showPlanNotice, cutOn]);
+  }, [chartId, page, pages, blockOrder, insertBlocks, prefs.gloss, prefs.legend, prefs.roadmapFull, editing, capo.capo, capo.cut, keyOverride, chartKeyOverride, showNotice, showPlanNotice, cutOn]);
 
   // Pointer events, not touch events: the same code path serves the
   // iPad on stage and a mouse on the laptop while testing.
@@ -1539,25 +1208,13 @@ function ChartView({ entry, chartId, fromSet, setNav, planKey, onNavigate, onLoa
             })}
           </div>
 
-          {renderOrder.map((rid, idx) => {
-            const isRpt = isRepeatId(rid);
-            const bid = baseIdOf(rid);
-            const b = blockOf(isRpt ? Number(bid) : bid);
+          {blockOrder.map((bid, idx) => {
+            const b = blockOf(bid);
             if (!b) return null;
-            // The variant notes for this block, when it is the printed copy of
-            // a collapsed group.
-            const vg = variantGroups.get(bid);
-            const vNotes = vg && !vg.noisy ? vg : null;
             return (
-              <div className={"sb-block" + (b.inserted ? " sb-block-ins" : "") + (isChorusBlock(b) ? " sb-block-chorus" : "") + (isRpt ? " sb-block-rpt" : "")}
-                key={rid} data-idx={idx} data-block={rid} data-repeat={isRpt ? "1" : undefined}>
+              <div className={"sb-block" + (b.inserted ? " sb-block-ins" : "")} key={bid} data-idx={idx} data-block={bid}>
                 <div className="sb-block-label">
                   {labelOf(b)}
-                  {/* Quietly marked so it is never mistaken for another chorus
-                      in the arrangement. It costs no vertical space: it rides
-                      in the label row that was already there, and the roadmap
-                      is untouched — the repeat has no position of its own. */}
-                  {isRpt && <span className="sb-rpt-tag">repeat</span>}
                   {/* A borrowed section is never allowed to read as part of
                       this song: it carries the source title, its language, and
                       the key it was written in (its numbers are the HOST's). */}
@@ -1584,45 +1241,24 @@ function ChartView({ entry, chartId, fromSet, setNav, planKey, onNavigate, onLoa
                     ▶ Load whole song
                   </button>
                 )}
-                {b.lines.map((ln, li) => {
-                  // Chord ordinal within the line, so a variant note lands on
-                  // the chord it describes. Counted over segments that actually
-                  // carry a chord, which is the same order collapseVariants
-                  // walked when it built the keys.
-                  let ci = -1;
-                  const lineNote = vNotes && vNotes.notes.get("line:" + li);
-                  return (
+                {b.lines.map((ln, li) => (
                   <div key={li}>
                     <div className="sb-line">
-                      {segmentsOf(ln).map((sg, si) => {
-                        if (sg.chord) ci += 1;
-                        const slotNote = sg.chord && vNotes && vNotes.notes.get(li + ":" + ci);
-                        return (
+                      {segmentsOf(ln).map((sg, si) => (
                         <span className="sb-seg" key={si}>
                           {sg.chord
                             ? <span className="sb-chord tappable" role="button" tabIndex={0}
                                 onPointerDown={onChordDown} onPointerUp={onChordUp(sg.chord)}
                                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setTapped(sg.chord); } }}
-                                title={cutOn ? "Can " + sg.chord + " be played with the cut capo?" : "How do I play " + sg.chord + "?"}>{chordText(sg.chord)}
-                                {/* The variant, subordinate to the chord it
-                                    qualifies: the player reads the big gold
-                                    chord by default and only drops to the note
-                                    when they are on that time through. */}
-                                {slotNote && <span className="sb-var">({noteTextFor(slotNote, vNotes.count)})</span>}
-                              </span>
+                                title={cutOn ? "Can " + sg.chord + " be played with the cut capo?" : "How do I play " + sg.chord + "?"}>{chordText(sg.chord)}</span>
                             : <span className="sb-chord" />}
                           <span className="sb-txt">{sg.text}</span>
                         </span>
-                      );})}
+                      ))}
                     </div>
-                    {/* A line whose chord COUNT changes between times cannot be
-                        annotated chord by chord without renaming chords that
-                        never moved, so the whole line's alternative is stated
-                        once, verbatim. */}
-                    {lineNote && <div className="sb-var-line">{noteTextFor(lineNote, vNotes.count)}</div>}
                     {ln.gloss && prefs.gloss !== false && <div className="sb-gloss">{ln.gloss}</div>}
                   </div>
-                );})}
+                ))}
               </div>
             );
           })}
