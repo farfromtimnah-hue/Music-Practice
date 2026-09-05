@@ -10,6 +10,7 @@ import {
   cutCapoAnswerFor, normalizeCapoSetting, cutFretOf, MAX_FULL_CAPO,
   savedShapesFor, saveShapeFor, deleteSavedShape, analyseShape,
 } from "./cutcapoAdapter.js";
+import { readInserts, addInsert, removeInsert, clearInserts, resolveInsert, isInsertId } from "./insertStore.js";
 import { guitarAnswerFor, chordNotesFor } from "./chordshapes.js";
 import CutCapoDiagram from "./CutCapoDiagram.jsx";
 import ChordDiagram from "./ChordDiagram.jsx";
@@ -129,6 +130,22 @@ const S = `
 .sb-block{margin:0 0 .85em;border-left:3px solid #14213d;padding-left:.55em;position:relative;}
 .sb-block.drag{opacity:.5;}
 .sb-block-label{font-family:'Oswald',sans-serif;font-size:.66em;letter-spacing:2px;text-transform:uppercase;color:#4a6da7;margin-bottom:.25em;display:flex;align-items:center;gap:8px;}
+/* A section borrowed from another song. Marked warm and edged so it can never
+   be read as part of the host song at a glance from a music stand. */
+.sb-block-ins{border-left-color:#c8892a;background:rgba(200,137,42,.06);border-radius:0 6px 6px 0;}
+.sb-ins-tag{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;text-transform:none;letter-spacing:0;}
+.sb-ins-from{font-size:.86em;color:#e0a850;font-style:italic;}
+.sb-ins-lang{font-size:.78em;letter-spacing:1px;color:#141018;background:#e0a850;border-radius:4px;padding:0 5px;font-weight:700;}
+.sb-ins-key{font-size:.8em;color:#8888aa;}
+.sb-ins-x{color:#ef5350 !important;}
+/* Quick-load: pressed in a hurry, one-handed, so it is a full-width slab. */
+.sb-ins-load{display:block;width:100%;min-height:44px;margin:.35em 0 .5em;background:rgba(200,137,42,.14);color:#e0a850;border:1px solid #7a5a22;border-radius:9px;font-family:'Oswald',sans-serif;font-size:.72em;letter-spacing:1.5px;cursor:pointer;}
+.sb-ins-load:active{background:rgba(200,137,42,.3);}
+.sb-load-whole{display:block;width:100%;min-height:60px;margin-top:12px;background:#f0c040;color:#141018;border:none;border-radius:11px;font-family:'Oswald',sans-serif;font-size:19px;letter-spacing:1.5px;cursor:pointer;}
+.sb-load-whole:active{background:#d8a828;}
+.sb-ins-hint{font-size:12px;color:#8888aa;line-height:1.5;margin-top:10px;}
+.sb-map-item.ins{background:rgba(200,137,42,.16);border-color:#7a5a22;color:#e0a850;}
+.sb-map-lang{font-size:.66em;letter-spacing:.5px;margin-left:2px;opacity:.85;}
 .sb-handle{margin-left:auto;display:flex;gap:4px;}
 .sb-handle button{border:1px solid #2a2a40;background:#0e0e16;color:#aaa;border-radius:6px;padding:2px 8px;font-size:14px;cursor:pointer;touch-action:none;}
 .sb-line{display:flex;flex-wrap:wrap;align-items:flex-end;margin:0;line-height:1.2;}
@@ -340,9 +357,167 @@ const paginateBlocks = (host, ids, availH, cols) => {
 };
 
 // ============================================================
+// ADD-SECTION PICKER — one search, two outcomes.
+//
+// Mid-song the team sometimes tags the chorus of a DIFFERENT song onto the end
+// of the one they are playing; rarely, someone decides in the moment that the
+// whole tagged song is happening after all. Both start from the same search
+// and the same song choice, so this is one flow with two exits, not two
+// features that happen to look alike.
+//
+// LANGUAGE. Many songs in this library exist as BOTH a Portuguese and an
+// English chart, and those are genuinely different arrangements rather than
+// translations — different artist, different tempo, sometimes different
+// sections entirely (the EN "Here as In Heaven" has an Intro the PT one does
+// not). So when a song has charts in both languages the picker ASKS which one
+// the section comes from, and never assumes the host song's language: a
+// Portuguese song carrying an English chorus is the actual use case here, not
+// an edge case. A song that exists in one language only skips the question.
+// ============================================================
+function AddSectionPicker({ index, hostChartId, hostKey, positions, onInsert, onLoadWhole, onClose }) {
+  const [query, setQuery] = useState("");
+  const [picked, setPicked] = useState(null);   // the chosen library entry
+  const [chartPick, setChartPick] = useState(null); // the chosen chart of it
+  const [at, setAt] = useState(-1);             // -1 = the end (the usual tag)
+
+  // One row per SONG, not per chart: the language question comes after, so the
+  // same song in two languages must not appear as two separate results.
+  const results = useMemo(() => {
+    if (query.trim().length < 2) return [];
+    const seen = new Set();
+    const out = [];
+    for (const r of search(index, query, 60)) {
+      if (seen.has(r.entry.id)) continue;
+      seen.add(r.entry.id);
+      out.push(r.entry);
+      if (out.length >= 30) break;
+    }
+    return out;
+  }, [index, query]);
+
+  const chartsOf = (e) => (e ? e.charts.map((id) => library.charts[id]).filter(Boolean) : []);
+  // The language question is only worth asking when there is a real choice.
+  const choose = (e) => {
+    const cs = chartsOf(e);
+    const langs = [...new Set(cs.map((c) => c.lang))];
+    setPicked(e);
+    setChartPick(langs.length > 1 ? null : (cs[0] ? cs[0].id : null));
+  };
+
+  const srcChart = chartPick ? library.charts[chartPick] : null;
+  const back = () => { if (chartPick && chartsOf(picked).length > 1) setChartPick(null); else { setPicked(null); setChartPick(null); } };
+
+  return (
+    <div className="sb-modal" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="sb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sb-sheet-top">
+          <span className="sb-sheet-name">{picked ? picked.en || picked.pt : "Add a section"}</span>
+          <span className="sb-sheet-sub">
+            {!picked ? "from another song, into this one"
+              : !srcChart ? "which chart is it from?"
+                : "pick a section, or load the whole song"}
+          </span>
+          <button className="sb-sheet-close" onClick={onClose}>Close</button>
+        </div>
+
+        {/* STEP 1 — find the song. */}
+        {!picked && (
+          <>
+            <div style={{ marginTop: 10 }}>
+              <input type="search" autoFocus placeholder="Search the library…" value={query}
+                onChange={(e) => setQuery(e.target.value)} />
+            </div>
+            <div className="sb-add-list">
+              {results.length === 0 && (
+                <div className="sb-empty">
+                  {query.trim().length < 2 ? "Type to search all " + library.songs.length + " songs." : "No song matches “" + query + "”."}
+                </div>
+              )}
+              {results.map((e) => {
+                const cs = chartsOf(e);
+                const langs = [...new Set(cs.map((c) => c.lang))];
+                return (
+                  <button className="sb-item" key={e.id} onClick={() => choose(e)}>
+                    <div style={{ flex: 1 }}>
+                      <div className="sb-item-title">{e.en || e.pt}</div>
+                      {e.en && e.pt && <div className="sb-item-sub">{e.en === (e.en || e.pt) ? e.pt : e.en}</div>}
+                    </div>
+                    <span className="sb-item-lang">{langs.map((l) => l.toUpperCase()).join(" · ")}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {/* STEP 2 — which arrangement? Only when there really is a choice. */}
+        {picked && !srcChart && (
+          <>
+            <div className="sb-ins-hint">
+              These are different arrangements, not translations — the sections
+              can differ. Pick the one the section comes from.
+            </div>
+            <div className="sb-add-list">
+              {chartsOf(picked).map((c) => (
+                <button className="sb-item" key={c.id} onClick={() => setChartPick(c.id)}>
+                  <div style={{ flex: 1 }}>
+                    <div className="sb-item-title">{c.names.primary}</div>
+                    <div className="sb-item-sub">
+                      {c.artist ? c.artist + " · " : ""}{c.blocks.length} sections{c.tempo ? " · " + c.tempo + " bpm" : ""}
+                    </div>
+                  </div>
+                  <span className="sb-item-lang">{c.lang.toUpperCase()}{c.key ? " · " + c.key.tonic : ""}</span>
+                </button>
+              ))}
+            </div>
+            <button className="sb-tool" style={{ marginTop: 10 }} onClick={back}>← Back to search</button>
+          </>
+        )}
+
+        {/* STEP 3 — one section, or the whole song. */}
+        {picked && srcChart && (
+          <>
+            <button className="sb-load-whole" onClick={() => onLoadWhole(picked, srcChart.id)}>
+              ▶ Load whole song
+            </button>
+            <div className="sb-ins-hint">
+              …or tag just one section onto this song:
+              {srcChart.key && hostKey && srcChart.key.tonicPc !== hostKey.tonicPc && (
+                <> its numbers will be counted in {keyName(hostKey)}, the key you are playing.</>
+              )}
+            </div>
+            <div className="sb-pos-row">
+              <span>Insert at</span>
+              <select value={at} onChange={(e) => setAt(Number(e.target.value))}>
+                {positions.map((_, i) => <option key={i} value={i}>position {i + 1}</option>)}
+                <option value={-1}>the end</option>
+              </select>
+            </div>
+            <div className="sb-add-list">
+              {srcChart.blocks.map((b) => (
+                <button className="sb-item" key={b.id}
+                  disabled={srcChart.id === hostChartId}
+                  onClick={() => onInsert(srcChart.id, b.id, at)}>
+                  <div style={{ flex: 1 }}>
+                    <div className="sb-item-title">{b.name}</div>
+                    <div className="sb-item-sub">{(b.lines[0] && b.lines[0].text) || "—"}</div>
+                  </div>
+                  <span className="sb-item-lang">{srcChart.lang.toUpperCase()}</span>
+                </button>
+              ))}
+            </div>
+            <button className="sb-tool" style={{ marginTop: 10 }} onClick={back}>← Back</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // CHART VIEW
 // ============================================================
-function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId, onBack, onSwitchChart, prefs, setPrefs, onKeepAlive, isTeacher, instrument }) {
+function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, index, serviceTypeId, onBack, onSwitchChart, prefs, setPrefs, onKeepAlive, isTeacher, instrument }) {
   const chart = library.charts[chartId];
   const detected = chart.key;
   const [keyOverride, setKeyOverride] = useState(() => lsGet("songbook_key_" + chartId, null));
@@ -354,9 +529,12 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId,
   // The cut capo is Nicole's own tool: teacher only, never offered to students.
   const [capo, setCapoState] = useState(() => normalizeCapoSetting(lsGet("songbook_capo_" + chartId, null)));
   const [tapped, setTapped] = useState(null); // chord token whose popup is open
+  // Sections borrowed from OTHER songs, living in this chart's block sequence.
+  const [inserts, setInserts] = useState(() => readInserts(chartId));
+  const [addSecOpen, setAddSecOpen] = useState(false);
   const dragRef = useRef(null);
 
-  useEffect(() => { setKeyOverride(lsGet("songbook_key_" + chartId, null)); setNoticeDismissed(lsGet("songbook_notice_" + chartId, false)); setCustomOrder(lsGet("songbook_order_" + chartId, null)); setCapoState(normalizeCapoSetting(lsGet("songbook_capo_" + chartId, null))); setEditing(false); setPickKey(false); setTapped(null); }, [chartId]);
+  useEffect(() => { setKeyOverride(lsGet("songbook_key_" + chartId, null)); setNoticeDismissed(lsGet("songbook_notice_" + chartId, false)); setCustomOrder(lsGet("songbook_order_" + chartId, null)); setCapoState(normalizeCapoSetting(lsGet("songbook_capo_" + chartId, null))); setInserts(readInserts(chartId)); setEditing(false); setPickKey(false); setTapped(null); setAddSecOpen(false); }, [chartId]);
   // Keep the app's inactivity timer from blanking a chart that is open on stage.
   useEffect(() => { if (!onKeepAlive) return; const t = setInterval(onKeepAlive, 60 * 1000); return () => clearInterval(t); }, [onKeepAlive]);
 
@@ -365,17 +543,97 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId,
   const langs = [...new Set(charts.map((c) => c.lang))];
   const sameLang = charts.filter((c) => c.lang === chart.lang);
 
+  // Inserted sections resolved against the library. One that no longer
+  // resolves (its source chart re-imported away) is dropped rather than
+  // rendered broken, which is also what keeps a stale id out of blockOrder.
+  const insertBlocks = useMemo(
+    () => inserts.map((ins) => resolveInsert(ins, library)).filter(Boolean),
+    [inserts]
+  );
+
+  // A block id is either a host block's integer id or an "ins:" synthetic one.
+  // Everything downstream — order, reorder, pagination, rendering — works in
+  // terms of blockOf(), so an inserted section is a block like any other.
+  const blockOf = useCallback((bid) => {
+    if (isInsertId(bid)) {
+      const ib = insertBlocks.find((x) => x.id === bid);
+      return ib ? { ...ib, inserted: true } : null;
+    }
+    const b = chart.blocks.find((x) => x.id === bid);
+    return b ? { ...b, inserted: false } : null;
+  }, [chart, insertBlocks]);
+
   const blockOrder = useMemo(() => {
     const ids = chart.blocks.map((b) => b.id);
-    if (!customOrder) return ids;
-    const valid = customOrder.filter((id) => ids.includes(id));
-    ids.forEach((id) => { if (!valid.includes(id)) valid.push(id); });
+    const insIds = insertBlocks.map((b) => b.id);
+    const all = [...ids, ...insIds];
+    // No custom order yet: host blocks in file order, then anything inserted.
+    if (!customOrder) return all;
+    // Keep only ids that still exist, then append anything new — a section
+    // inserted while a custom order is in force appears at the end until she
+    // moves it, rather than silently vanishing because the order predates it.
+    const valid = customOrder.filter((id) => all.includes(id));
+    all.forEach((id) => { if (!valid.includes(id)) valid.push(id); });
     return valid;
-  }, [chart, customOrder]);
+  }, [chart, customOrder, insertBlocks]);
   const saveOrder = (ids) => { setCustomOrder(ids); lsSet("songbook_order_" + chartId, ids); };
   const move = (from, to) => { if (to < 0 || to >= blockOrder.length) return; const ids = blockOrder.slice(); const [x] = ids.splice(from, 1); ids.splice(to, 0, x); saveOrder(ids); };
 
-  const roadmap = chart.roadmap || chart.order.map((o) => ({ block: o.block, label: o.label, times: o.times }));
+  /**
+   * Insert one section of another song at a position in this chart's order.
+   * The order is written explicitly (rather than left to the append rule) so
+   * the section lands exactly where she chose, which is normally the end —
+   * a tag onto the song they are already playing.
+   */
+  const insertSection = (srcChartId, srcBlockId, at) => {
+    const id = addInsert(chartId, srcChartId, srcBlockId);
+    const next = readInserts(chartId);
+    setInserts(next);
+    const ids = blockOrder.filter((x) => x !== id);
+    const pos = at == null || at < 0 || at > ids.length ? ids.length : at;
+    ids.splice(pos, 0, id);
+    saveOrder(ids);
+    setAddSecOpen(false);
+  };
+
+  /** Remove an inserted section: it leaves both the order and the store. */
+  const dropInsert = (id) => {
+    removeInsert(chartId, id);
+    setInserts(readInserts(chartId));
+    saveOrder(blockOrder.filter((x) => x !== id));
+  };
+
+  /** Reset order also clears insertions — one "this chart has been
+   *  rearranged" fact, cleared by the one button that already means that. */
+  const resetArrangement = () => {
+    clearInserts(chartId);
+    setInserts([]);
+    setCustomOrder(null);
+    try { localStorage.removeItem("songbook_order_" + chartId); } catch (e) { /* ignore */ }
+  };
+
+  // The roadmap follows the ARRANGEMENT, not the file: a borrowed section is
+  // part of what the band plays, so it has to appear in the map they read.
+  // Host entries keep the chart's own roadmap (which carries repeat counts and
+  // unresolved labels); inserted ones are appended in block-order position.
+  const roadmap = useMemo(() => {
+    const base = chart.roadmap || chart.order.map((o) => ({ block: o.block, label: o.label, times: o.times }));
+    const insIds = blockOrder.filter(isInsertId);
+    if (!insIds.length) return base;
+    const out = base.slice();
+    insIds.forEach((id) => {
+      const ib = insertBlocks.find((x) => x.id === id);
+      if (!ib) return;
+      // Place it in the map where it sits in the order, relative to the host
+      // blocks around it, so the map reads the way the song is played.
+      const pos = blockOrder.indexOf(id);
+      const before = blockOrder.slice(0, pos).filter((x) => !isInsertId(x));
+      const lastHost = before.length ? before[before.length - 1] : null;
+      const mapIdx = lastHost == null ? 0 : out.findIndex((r) => r.block === lastHost) + 1;
+      out.splice(mapIdx > 0 ? mapIdx : out.length, 0, { block: id, label: ib.name, times: 1, inserted: true, lang: ib.srcLang });
+    });
+    return out;
+  }, [chart, blockOrder, insertBlocks]);
   const abbr = useMemo(() => abbreviationsFor(chart.blocks.map((b) => b.name)), [chart]);
   const useFull = prefs.roadmapFull || chart.abbrevCollision;
   const labelOf = (b) => b.name;
@@ -581,7 +839,7 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId,
     // setPages to an equal value is skipped above, and React drops a set to
     // the identical null — so this converges instead of spinning.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chartId, page, pages, blockOrder, prefs.gloss, prefs.legend, prefs.roadmapFull, editing, capo.capo, capo.cut, keyOverride, showNotice, cutOn]);
+  }, [chartId, page, pages, blockOrder, insertBlocks, prefs.gloss, prefs.legend, prefs.roadmapFull, editing, capo.capo, capo.cut, keyOverride, showNotice, cutOn]);
 
   // Pointer events, not touch events: the same code path serves the
   // iPad on stage and a mouse on the laptop while testing.
@@ -727,7 +985,8 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId,
           {chart.glossCount > 0 && <button className={"sb-tool" + (prefs.gloss !== false ? " on" : "")} onClick={() => setPrefs({ ...prefs, gloss: prefs.gloss === false })}>Gloss</button>}
           {!chart.abbrevCollision && <button className={"sb-tool" + (prefs.roadmapFull ? " on" : "")} onClick={() => setPrefs({ ...prefs, roadmapFull: !prefs.roadmapFull })}>{prefs.roadmapFull ? "Full" : "Letters"}</button>}
           <button className={"sb-tool" + (editing ? " on" : "")} onClick={() => setEditing((v) => !v)}>{editing ? "Done" : "Reorder"}</button>
-          {customOrder && <button className="sb-tool" onClick={() => { saveOrder(null); setCustomOrder(null); try { localStorage.removeItem("songbook_order_" + chartId); } catch (e) { /* ignore */ } }}>Reset order</button>}
+          {editing && <button className="sb-tool" onClick={() => setAddSecOpen(true)}>+ Add section</button>}
+          {(customOrder || inserts.length > 0) && <button className="sb-tool" onClick={resetArrangement}>Reset order</button>}
           {prefs.legend && key && keyLegend(key).map((l) => <span key={l.degree} className="sb-legend-i"><b>{l.degree}</b>={l.name}</span>)}
           <span className="sb-bar-sp" />
         </div>
@@ -748,26 +1007,49 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId,
         <div className="sb-fit" ref={fitRef}>
           <div className="sb-map">
             {roadmap.map((r, i) => {
-              const b = r.block != null ? chart.blocks.find((x) => x.id === r.block) : null;
-              const label = b ? (useFull ? labelOf(b) : abbr.map[b.name]) : r.label;
-              return <span key={i} className={"sb-map-item" + (b ? "" : " x")}>{label}{r.times > 1 ? " ×" + r.times : ""}</span>;
+              const b = r.block != null ? blockOf(r.block) : null;
+              const label = b ? (useFull || r.inserted ? labelOf(b) : (abbr.map[b.name] || labelOf(b))) : r.label;
+              return (
+                <span key={i} className={"sb-map-item" + (b ? "" : " x") + (r.inserted ? " ins" : "")}>
+                  {label}{r.inserted ? <sup className="sb-map-lang">{r.lang.toUpperCase()}</sup> : null}{r.times > 1 ? " ×" + r.times : ""}
+                </span>
+              );
             })}
           </div>
 
           {blockOrder.map((bid, idx) => {
-            const b = chart.blocks.find((x) => x.id === bid);
+            const b = blockOf(bid);
+            if (!b) return null;
             return (
-              <div className="sb-block" key={bid} data-idx={idx} data-block={bid}>
+              <div className={"sb-block" + (b.inserted ? " sb-block-ins" : "")} key={bid} data-idx={idx} data-block={bid}>
                 <div className="sb-block-label">
                   {labelOf(b)}
+                  {/* A borrowed section is never allowed to read as part of
+                      this song: it carries the source title, its language, and
+                      the key it was written in (its numbers are the HOST's). */}
+                  {b.inserted && (
+                    <span className="sb-ins-tag">
+                      <span className="sb-ins-from">from {b.srcTitle}</span>
+                      <span className="sb-ins-lang">{b.srcLang.toUpperCase()}</span>
+                      {b.srcKey && key && b.srcKey.tonicPc !== key.tonicPc && (
+                        <span className="sb-ins-key">written in {b.srcKey.tonic}</span>
+                      )}
+                    </span>
+                  )}
                   {editing && (
                     <span className="sb-handle">
                       <button onClick={() => move(idx, idx - 1)}>↑</button>
                       <button onClick={() => move(idx, idx + 1)}>↓</button>
                       <button onPointerDown={onPointerDown(idx)} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>☰</button>
+                      {b.inserted && <button className="sb-ins-x" onClick={() => dropInsert(bid)}>✕</button>}
                     </span>
                   )}
                 </div>
+                {b.inserted && b.srcEntry && (
+                  <button className="sb-ins-load" onClick={() => onLoadWhole(b.srcEntry, b.srcChartId)}>
+                    ▶ Load whole song
+                  </button>
+                )}
                 {b.lines.map((ln, li) => (
                   <div key={li}>
                     <div className="sb-line">
@@ -798,6 +1080,11 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId,
       {tapped && (cutOn
         ? <CutCapoPopup token={tapped} capoSetting={capo} isTeacher={isTeacher} onClose={() => setTapped(null)} />
         : <ChordPopup token={tapped} capoFret={capo.capo} instrument={instrument} onClose={() => setTapped(null)} />)}
+
+      {addSecOpen && (
+        <AddSectionPicker index={index} hostChartId={chartId} hostKey={key} positions={blockOrder}
+          onInsert={insertSection} onLoadWhole={onLoadWhole} onClose={() => setAddSecOpen(false)} />
+      )}
     </div>
   );
 }
@@ -1259,6 +1546,21 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
     setKeyFor(null);
   }, []);
 
+  /**
+   * Quick-load: open another song's full chart, replacing the current view.
+   *
+   * Whether set navigation survives is decided by the SET, not by where the
+   * tap came from: a song that is on today's running order opens as part of
+   * it and keeps prev/next and the swipe, and one that is not opens
+   * standalone — exactly how a song opened from search behaves today. The
+   * lookup is by entry, matching how navIndex is derived, so a song opened in
+   * its other language still lands in the right slot.
+   */
+  const loadWholeSong = useCallback((entry, chartId) => {
+    const onSet = setSongs.some((s) => s.entry === entry);
+    setOpen({ entry, chartId, fromSet: onSet });
+  }, [setSongs]);
+
   if (open) {
     // Position is found by entry, so switching language/version inside a song
     // keeps the same slot in the set.
@@ -1266,8 +1568,9 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
     const setNav = navIndex >= 0 ? { list: setSongs, index: navIndex } : null;
     return (
       <><style>{S}</style><div className="sb sb-fixed">
-        <ChartView entry={open.entry} chartId={open.chartId} fromSet={open.fromSet} setNav={setNav} serviceTypeId={serviceId} prefs={prefs} setPrefs={setPrefs} onKeepAlive={onKeepAlive} isTeacher={isTeacher} instrument={instrument}
+        <ChartView entry={open.entry} chartId={open.chartId} fromSet={open.fromSet} setNav={setNav} index={index} serviceTypeId={serviceId} prefs={prefs} setPrefs={setPrefs} onKeepAlive={onKeepAlive} isTeacher={isTeacher} instrument={instrument}
           onNavigate={(t) => setOpen({ entry: t.entry, chartId: t.chartId, fromSet: true })}
+          onLoadWhole={loadWholeSong}
           onBack={() => setOpen(null)} onSwitchChart={(id) => setOpen({ ...open, chartId: id })} />
       </div></>
     );
