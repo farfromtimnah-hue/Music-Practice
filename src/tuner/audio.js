@@ -57,6 +57,7 @@ export class TunerAudio {
     this.buffer = null;
     this.toneNodes = null;
     this.micGain = null;
+    this.sink = null;
   }
 
   /**
@@ -115,8 +116,20 @@ export class TunerAudio {
 
     this.source.connect(this.micGain);
     this.micGain.connect(this.analyser);
-    // Note: the analyser is intentionally NOT connected to the
-    // destination. Routing the mic to the speakers would feed back.
+
+    // iOS Safari only PULLS a node graph that reaches the destination.
+    // An analyser left dangling is never fed, so getFloatTimeDomainData
+    // returns a buffer of zeros for ever while the context happily
+    // reports "running" and the mic indicator stays lit — detection then
+    // fails on silence no matter how loud the room is.
+    //
+    // Routing the mic to the speakers would feed back, so the sink is a
+    // gain node pinned at 0: the graph gets pulled, and nothing is
+    // audible. Keep a reference so stop() can tear it down.
+    this.sink = this.ctx.createGain();
+    this.sink.gain.value = 0;
+    this.analyser.connect(this.sink);
+    this.sink.connect(this.ctx.destination);
 
     this.buffer = new Float32Array(this.analyser.fftSize);
     return this.ctx.sampleRate;
@@ -249,6 +262,7 @@ export class TunerAudio {
     try { this.source && this.source.disconnect(); } catch {}
     try { this.micGain && this.micGain.disconnect(); } catch {}
     try { this.analyser && this.analyser.disconnect(); } catch {}
+    try { this.sink && this.sink.disconnect(); } catch {}
     if (this.stream) {
       // Stopping every track is what actually clears the browser's
       // "recording" indicator.
@@ -262,6 +276,7 @@ export class TunerAudio {
     this.source = null;
     this.analyser = null;
     this.micGain = null;
+    this.sink = null;
     this.buffer = null;
   }
 }
