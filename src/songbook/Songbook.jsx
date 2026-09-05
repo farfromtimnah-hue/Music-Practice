@@ -6,7 +6,9 @@ import { SERVICE_TYPES, STUDENT_SERVICE_IDS, defaultDateFor, readCachedSet, fetc
 import { toNashville, keyLegend, capoLabel, keyName, parseKeyName, transposedKeyName, KEY_LIST } from "./chords.js";
 import { abbreviationsFor } from "./sections.js";
 import { cutCapoAnswerFor, normalizeCapoSetting, cutFretOf, MAX_FULL_CAPO } from "./cutcapoAdapter.js";
+import { guitarAnswerFor, chordNotesFor } from "./chordshapes.js";
 import CutCapoDiagram from "./CutCapoDiagram.jsx";
+import ChordDiagram from "./ChordDiagram.jsx";
 
 // ============================================================
 // STORAGE — songbook_ keys only. Never touches c5Log.
@@ -108,8 +110,26 @@ const S = `
 .sb-capo{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end;margin-top:6px;}
 .sb-capo select{padding:5px 8px;font-size:13px;}
 .sb-capo-lbl{display:flex;align-items:center;gap:5px;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:#8888aa;}
-.sb-chord.tappable{cursor:pointer;}
+.sb-chord.tappable{cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;position:relative;display:inline-block;}
+/* A chord token is small type and a fingertip is not precise, so the tap
+   area is grown past the glyph with a pseudo-element rather than padding —
+   padding would move the chord off the syllable it sits above, and sitting
+   over the right syllable is the whole point of a chord chart.
+   It grows DOWNWARD most: the space under a chord is its own lyric line and
+   is not a tap target, while the space above belongs to the line before.
+   Horizontal growth stays inside the .4em gutter so neighbouring chords do
+   not steal each other's taps. */
+.sb-chord.tappable::after{content:'';position:absolute;left:-.3em;right:-.1em;top:-.5em;bottom:-.9em;}
 .sb-chord.tappable:hover{text-decoration:underline;}
+.sb-chord.tappable:active{color:#fff;}
+.sb-notes-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;}
+.sb-note-chip{display:flex;flex-direction:column;align-items:center;gap:1px;border:1.5px solid #2a2a40;background:#0a0a10;border-radius:10px;padding:8px 12px;min-width:52px;}
+.sb-note-chip b{font-family:'Oswald',sans-serif;font-size:20px;color:var(--gold,#f0c040);font-weight:700;letter-spacing:1px;}
+.sb-note-chip span{font-size:11px;color:#8888aa;}
+.sb-note-chip.root{border-color:var(--gold,#f0c040);background:rgba(240,192,64,.08);}
+.sb-note-chip.bass{border-color:#81c784;}
+.sb-note-chip.bass b{color:#81c784;}
+.sb-sheet-note{font-size:13px;color:#aaa;line-height:1.45;margin-top:10px;}
 .sb-cc-hint{font-size:12px;color:#8888aa;margin:0 0 4px;}
 .sb-modal{position:fixed;inset:0;background:rgba(0,0,0,.82);display:flex;align-items:flex-end;justify-content:center;z-index:500;}
 .sb-sheet{background:#0e0e16;border:1.5px solid #2a2a40;border-radius:16px 16px 0 0;width:100%;max-width:560px;max-height:86vh;overflow-y:auto;padding:16px 16px 26px;}
@@ -274,7 +294,7 @@ const paginateBlocks = (host, ids, availH, cols) => {
 // ============================================================
 // CHART VIEW
 // ============================================================
-function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId, onBack, onSwitchChart, prefs, setPrefs, onKeepAlive, isTeacher }) {
+function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId, onBack, onSwitchChart, prefs, setPrefs, onKeepAlive, isTeacher, instrument }) {
   const chart = library.charts[chartId];
   const detected = chart.key;
   const [keyOverride, setKeyOverride] = useState(() => lsGet("songbook_key_" + chartId, null));
@@ -549,6 +569,26 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId,
   };
   const onSwipeCancel = () => { swipeRef.current = null; };
 
+  // CHORD TAP. Pointer events, so one path serves an iPad fingertip and a
+  // laptop mouse — iOS Safari only synthesises `click` on some elements, and a
+  // plain <span> is not reliably one of them.
+  //
+  // A tap is a pointerup that did not travel: the chart is also a swipe
+  // surface, so a drag that happens to END on a chord must stay a swipe and
+  // change the song rather than opening a popup. Only a still finger counts,
+  // and only then is the event kept from the swipe handler underneath.
+  const tapRef = useRef(null);
+  const TAP_SLOP = 10; // px of travel still counted as a tap, not a drag
+  const onChordDown = (e) => { tapRef.current = { x: e.clientX, y: e.clientY, id: e.pointerId }; };
+  const onChordUp = (chord) => (e) => {
+    const t = tapRef.current;
+    tapRef.current = null;
+    if (!t || t.id !== e.pointerId) return;
+    if (Math.abs(e.clientX - t.x) > TAP_SLOP || Math.abs(e.clientY - t.y) > TAP_SLOP) return; // a drag: let the swipe have it
+    e.stopPropagation();
+    setTapped(chord);
+  };
+
   useEffect(() => {
     const onKey = (e) => {
       const horizontal = e.key === "ArrowLeft" || e.key === "ArrowRight";
@@ -652,6 +692,7 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId,
           </div>
         )}
         {cutOn && <div className="sb-cc-hint">Cut capo at fret {cutFret} (A, D and G strings{capo.capo > 0 ? ", two frets above the capo at " + capo.capo : ""}). Tap any chord to see whether it survives the capo.</div>}
+        {!cutOn && <div className="sb-cc-hint">Tap any chord to see how to play it{capo.capo > 0 ? " with the capo at " + capo.capo : ""}.</div>}
       </div>
 
       {/* The box the fit measures against: whatever the header left over. */}
@@ -684,12 +725,12 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId,
                     <div className="sb-line">
                       {segmentsOf(ln).map((sg, si) => (
                         <span className="sb-seg" key={si}>
-                          {sg.chord && cutOn
+                          {sg.chord
                             ? <span className="sb-chord tappable" role="button" tabIndex={0}
-                                onClick={() => setTapped(sg.chord)}
+                                onPointerDown={onChordDown} onPointerUp={onChordUp(sg.chord)}
                                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setTapped(sg.chord); } }}
-                                title={"Can " + sg.chord + " be played with the cut capo?"}>{chordText(sg.chord)}</span>
-                            : <span className="sb-chord">{sg.chord ? chordText(sg.chord) : ""}</span>}
+                                title={cutOn ? "Can " + sg.chord + " be played with the cut capo?" : "How do I play " + sg.chord + "?"}>{chordText(sg.chord)}</span>
+                            : <span className="sb-chord" />}
                           <span className="sb-txt">{sg.text}</span>
                         </span>
                       ))}
@@ -706,7 +747,117 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId,
 
       {navButtons}
 
-      {cutOn && tapped && <CutCapoPopup token={tapped} capoSetting={capo} onClose={() => setTapped(null)} />}
+      {tapped && (cutOn
+        ? <CutCapoPopup token={tapped} capoSetting={capo} onClose={() => setTapped(null)} />
+        : <ChordPopup token={tapped} capoFret={capo.capo} instrument={instrument} onClose={() => setTapped(null)} />)}
+    </div>
+  );
+}
+
+// ============================================================
+// CHORD POPUP — "how do I play this?", for every capo state that is not the
+// cut capo. The cut capo keeps its own popup below, because its question is a
+// different one (does this chord survive the capo at all?).
+//
+// Instrument decides the ANSWER SHAPE, not just the styling:
+//   guitar / teacher : a fretboard diagram — there is one shape the hands want
+//   keys             : the notes; keyboard voicing is two-handed and variable,
+//                      so there is no single correct fingering to draw
+//   bass             : the root and the available notes, for the same reason —
+//                      a bass line is built, not gripped
+// ============================================================
+function ChordPopup({ token, capoFret = 0, instrument, onClose }) {
+  const fretted = instrument !== "keys" && instrument !== "bass";
+  const guitar = useMemo(() => (fretted ? guitarAnswerFor(token, capoFret) : null), [fretted, token, capoFret]);
+  const notes = useMemo(() => (fretted ? null : chordNotesFor(token)), [fretted, token]);
+  const res = fretted ? guitar : notes;
+  const capo = fretted ? guitar.capo : 0;
+
+  // With a capo the chord under the fingers is not the chord on the page, and
+  // both matter: she reads the sounding name off the chart and plays the shape.
+  const sub = !fretted
+    ? (instrument === "bass" ? "chord tones" : "notes in the chord")
+    : guitar.status === "not-a-chord"
+      ? ""
+      : capo > 0
+        ? "sounding · play " + guitar.shapeLabel + " shape · capo " + capo
+        : "no capo";
+
+  return (
+    <div className="sb-modal" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="sb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sb-sheet-top">
+          <span className="sb-sheet-name">{(res && (res.soundingLabel || res.label)) || token}</span>
+          <span className="sb-sheet-sub">{sub}</span>
+          <button className="sb-sheet-close" onClick={onClose}>Close</button>
+        </div>
+
+        {res.status === "not-a-chord" && (
+          <div className="sb-cc-no">
+            <div className="sb-cc-no-head">Not a chord</div>
+            <div className="sb-cc-no-body">“{token}” is not a chord symbol.</div>
+          </div>
+        )}
+
+        {res.status === "none" && (
+          <div className="sb-cc-no">
+            <div className="sb-cc-no-head">No shape for this chord</div>
+            <div className="sb-cc-no-body">
+              {guitar.shapeLabel} is not one the shape library covers. Play the notes that are in it, or simplify the chord.
+            </div>
+          </div>
+        )}
+
+        {res.status === "ok" && fretted && (
+          <>
+            {guitar.reduced && <div className="sb-cc-warn">Shown as the nearest chord this library models; added colour tones are not drawn.</div>}
+            <div className="sb-cc-card">
+              <div className="sb-cc-card-top">
+                <span>{guitar.barre > 0 ? "Barre at fret " + (guitar.barre + capo) : "Open position"}</span>
+                <span>{capo > 0 ? "fret numbers are absolute" : ""}</span>
+              </div>
+              <ChordDiagram shape={guitar.shape} capo={capo} barre={guitar.barre} />
+              <div className="sb-cc-card-top" style={{ marginTop: 6 }}>
+                <span>Notes low→high{capo > 0 ? " (sounding)" : ""}</span>
+                <span className="sb-cc-notes">{guitar.notes.join(" · ")}</span>
+              </div>
+            </div>
+            {capo > 0 && (
+              <div className="sb-sheet-note">
+                Capo at fret {capo}. The chart says <b>{guitar.soundingLabel}</b>; with the capo on you finger a
+                {" "}<b>{guitar.shapeLabel}</b> shape and it sounds as {guitar.soundingLabel}.
+              </div>
+            )}
+          </>
+        )}
+
+        {res.status === "ok" && !fretted && (
+          <>
+            {notes.reduced && <div className="sb-cc-warn">Shown as the nearest chord this library models; added colour tones are not listed.</div>}
+            <div className="sb-cc-card">
+              <div className="sb-cc-card-top">
+                <span>{instrument === "bass" ? "Root and chord tones" : "Notes in the chord"}</span>
+                <span>{notes.bass !== notes.root ? "over " + notes.bass : ""}</span>
+              </div>
+              <div className="sb-notes-row">
+                {notes.bass !== notes.root && (
+                  <span className="sb-note-chip bass"><b>{notes.bass}</b><span>bass</span></span>
+                )}
+                {notes.notes.map((n, i) => (
+                  <span key={i} className={"sb-note-chip" + (i === 0 ? " root" : "")}>
+                    <b>{n}</b><span>{notes.intervals[i]}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="sb-sheet-note">
+              {instrument === "bass"
+                ? <>Start from <b>{notes.bass}</b>. The other tones are what the line can pass through without fighting the chord.</>
+                : <>Voice these with both hands as the arrangement needs — there is no one fingering for a keyboard chord.</>}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -777,7 +928,7 @@ function CutCapoPopup({ token, capoSetting, onClose }) {
 // ============================================================
 // SONGBOOK — set list + search
 // ============================================================
-export default function Songbook({ isTeacher, onBack, onKeepAlive }) {
+export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument }) {
   const [serviceId, setServiceId] = useState(() => {
     const w = defaultDateFor("1707498"); // Saturday
     const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -843,7 +994,7 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive }) {
     const setNav = navIndex >= 0 ? { list: setSongs, index: navIndex } : null;
     return (
       <><style>{S}</style><div className="sb sb-fixed">
-        <ChartView entry={open.entry} chartId={open.chartId} fromSet={open.fromSet} setNav={setNav} serviceTypeId={serviceId} prefs={prefs} setPrefs={setPrefs} onKeepAlive={onKeepAlive} isTeacher={isTeacher}
+        <ChartView entry={open.entry} chartId={open.chartId} fromSet={open.fromSet} setNav={setNav} serviceTypeId={serviceId} prefs={prefs} setPrefs={setPrefs} onKeepAlive={onKeepAlive} isTeacher={isTeacher} instrument={instrument}
           onNavigate={(t) => setOpen({ entry: t.entry, chartId: t.chartId, fromSet: true })}
           onBack={() => setOpen(null)} onSwitchChart={(id) => setOpen({ ...open, chartId: id })} />
       </div></>

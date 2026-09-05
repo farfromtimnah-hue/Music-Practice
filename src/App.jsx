@@ -1395,7 +1395,7 @@ if (screen==="tuner") {
 // open chart hold off the inactivity timeout while it is on a music stand.
 if (screen==="songbook") {
   return (<><style>{S}</style>
-    <Songbook isTeacher={isTeacher} onKeepAlive={resetTimer} onBack={()=>setScreen(isTeacher?"teacherHome":"home")}/>
+    <Songbook isTeacher={isTeacher} instrument={isTeacher ? "guitar" : studentInstrument} onKeepAlive={resetTimer} onBack={()=>setScreen(isTeacher?"teacherHome":"home")}/>
   </>);
 }
 
