@@ -1,7 +1,7 @@
 {
   "name": "C5 Music Practice – Songbook",
   "short_name": "Songbook",
-  "start_url": "/Music-Practice/",
+  "start_url": "/Music-Practice/#songbook",
   "scope": "/Music-Practice/",
   "display": "standalone",
   "background_color": "#000000",

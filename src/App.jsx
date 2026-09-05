@@ -23,6 +23,52 @@ const STUDENTS = {
 };
 
 // ============================================================
+// SESSION — remembers WHO is signed in, so a launch is not four steps.
+//
+// Only the name and a timestamp are stored, under mp_session. The PIN is
+// never written to disk: this key says "Nicole was here", not "let anyone
+// in". The PIN screen is still the path for a fresh sign-in and after the
+// inactivity timeout, which is what keeps a shared church iPad honest.
+//
+// Deliberately its own key. style_<name> and c5Log are untouched.
+// ============================================================
+const SESSION_KEY = "mp_session";
+const TEACHER_ID = "__teacher__";
+
+/** Is this a name we still recognise? Guards against a renamed/removed student. */
+const knownLogin = (name) => name === TEACHER_ID || Object.prototype.hasOwnProperty.call(STUDENTS, name);
+
+const readSession = () => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    if (!raw || typeof raw.name !== "string" || !knownLogin(raw.name)) return null;
+    return raw;
+  } catch (e) { return null; }
+};
+const writeSession = (name) => {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify({ name, at: Date.now() })); } catch (e) { /* ignore */ }
+};
+const clearSession = () => {
+  try { localStorage.removeItem(SESSION_KEY); } catch (e) { /* ignore */ }
+};
+
+// ============================================================
+// HASH ROUTES — so the PWA reopens where she was, and so the installed
+// icon can point straight at the songbook.
+//
+// Only the routes that are worth deep-linking are mapped; everything else
+// is transient UI that has no business in a URL.
+// ============================================================
+const ROUTES = { "#songbook": "songbook", "#songbook/set": "songbook" };
+const HASH_FOR = { songbook: "#songbook" };
+
+/** The screen a hash asks for, or null. Unknown hashes are ignored, not obeyed. */
+const routeFromHash = () => {
+  const h = (typeof window !== "undefined" && window.location.hash) || "";
+  return ROUTES[h] || null;
+};
+
+// ============================================================
 // ALL 15 KEYS — enharmonics are fully separate entries
 // ============================================================
 const KEYS = [
@@ -265,6 +311,10 @@ body{font-family:'Source Sans 3',sans-serif;background:var(--bg);color:var(--tex
 .card-btn-sub{font-size:12px;font-weight:400;color:var(--muted);}
 .card-btn.muted{border-style:dashed;color:var(--muted);}
 .primary-btn{padding:15px;border-radius:var(--radius);border:none;background:var(--gold);color:var(--bg);font-family:'Oswald',sans-serif;font-size:17px;font-weight:700;letter-spacing:2px;cursor:pointer;width:100%;transition:all .15s;}
+/* The songbook is what gets opened on a Sunday, so it leads the list and
+   carries a bigger tap target than the rest — a fingertip on a music stand,
+   not a cursor. */
+.songbook-btn{padding:20px;font-size:19px;}
 .primary-btn:active{opacity:.85;transform:scale(.98);}
 .ghost-btn{padding:13px;border-radius:var(--radius);border:1.5px solid var(--border);background:var(--surface);color:var(--muted);font-family:'Oswald',sans-serif;font-size:14px;font-weight:600;letter-spacing:1px;cursor:pointer;width:100%;transition:all .15s;}
 .ghost-btn:active{border-color:var(--gold);color:var(--gold);}
@@ -284,7 +334,12 @@ body{font-family:'Source Sans 3',sans-serif;background:var(--bg);color:var(--tex
 .top-bar{display:flex;align-items:center;justify-content:space-between;padding:6px 0;}
 .top-name{font-family:'Oswald',sans-serif;font-size:14px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;}
 .top-logo{font-family:'Oswald',sans-serif;font-size:20px;font-weight:700;color:var(--gold);letter-spacing:3px;}
-.circle-wrap{position:relative;width:100%;aspect-ratio:1;max-width:380px;margin:0 auto;}
+/* The circle is the identity of the app, but it is not the thing anyone
+   opens the app to DO on a Sunday. Capping its height by viewport keeps the
+   Songbook button — the first action under it — above the fold on an iPad in
+   both orientations, instead of a screenful of circle and a scroll. */
+.circle-wrap{position:relative;width:100%;aspect-ratio:1;max-width:min(380px,42dvh);margin:0 auto;}
+.circle-wrap>svg{width:100%;height:100%;display:block;}
 .circle-svg{width:100%;height:100%;}
 .legend{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;}
 .leg{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);}
@@ -984,14 +1039,38 @@ function buildBassNameRound() {
 // APP
 // ============================================================
 export default function App() {
-const [screen, setScreen]             = useState("nameSelect");
-const [selectedLoginName, setSelectedLoginName] = useState("");
+// A remembered session decides the very first screen, so the app never
+// renders the name picker just to replace it a tick later.
+const boot = (typeof window !== "undefined" ? readSession() : null);
+const bootRoute = (typeof window !== "undefined" ? routeFromHash() : null);
+const bootTeacher = !!boot && boot.name === TEACHER_ID;
+
+const [screen, setScreen]             = useState(() => {
+  if (!boot) return "nameSelect";
+  if (bootRoute) return bootRoute;                     // deep link, straight in
+  if (bootTeacher) return "teacherHome";
+  // A student who never finished picking a learning style still has to.
+  let style = null;
+  try { style = localStorage.getItem(`style_${boot.name}`); } catch (e) { /* ignore */ }
+  return style ? "home" : "stylePick";
+});
+// Where to land once a PIN is accepted. A deep link opened WITHOUT a session
+// parks its destination here so the route survives the PIN screen instead of
+// dumping her on the home screen with the destination silently dropped.
+const [pendingRoute, setPendingRoute] = useState(bootRoute);
+const [selectedLoginName, setSelectedLoginName] = useState(() => (boot ? boot.name : ""));
 const [pin, setPin]                   = useState("");
 const [pinError, setPinError]         = useState(false);
-const [isTeacher, setIsTeacher]       = useState(false);
-const [studentName, setStudentName]   = useState("");
-const [studentInstrument, setStudentInstrument] = useState("");
-const [learningStyle, setLearningStyle] = useState(null);
+const [isTeacher, setIsTeacher]       = useState(bootTeacher);
+const [studentName, setStudentName]   = useState(() => (boot && !bootTeacher ? boot.name : ""));
+const [studentInstrument, setStudentInstrument] = useState(() =>
+  (boot && !bootTeacher && STUDENTS[boot.name] ? STUDENTS[boot.name].instrument : ""));
+// A restored student keeps the style they already picked; without this the
+// style picker would reappear on every launch, which is a step, not a saving.
+const [learningStyle, setLearningStyle] = useState(() => {
+  if (!boot || bootTeacher) return null;
+  try { return localStorage.getItem(`style_${boot.name}`) || null; } catch (e) { return null; }
+});
 const [quizAnswers, setQuizAnswers]   = useState([]);
 const [quizQ, setQuizQ]               = useState(0);
 const [lockedKey, setLockedKey]       = useState(null);
@@ -1030,8 +1109,40 @@ const [bassTap, setBassTap]           = useState(null);   // tapped cell {s,fret
 const timer = useRef(null);
 const resetTimer = useCallback(() => {
 if (timer.current) clearTimeout(timer.current);
-if (screen!=="nameSelect"&&screen!=="timeout")
-timer.current = setTimeout(()=>setScreen("timeout"), 15*60*1000);
+// The login screens are already locked; timing out from them would only
+// bounce the user between two doors.
+if (screen!=="nameSelect"&&screen!=="timeout"&&screen!=="pin")
+timer.current = setTimeout(()=>{
+// Remember a routed screen across the lock, so one PIN puts her back on the
+// songbook she was reading rather than on the home screen.
+setPendingRoute((prev)=>HASH_FOR[screen]?screen:prev);
+setScreen("timeout");
+}, 15*60*1000);
+}, [screen]);
+
+// HASH SYNC — keep the URL pointing at where she actually is, so the PWA and
+// a plain browser reload both reopen on the same screen. Routed screens write
+// their hash; everything else clears it rather than leaving a stale one behind.
+useEffect(() => {
+if (screen==="nameSelect"||screen==="pin"||screen==="timeout") return;
+const want = HASH_FOR[screen] || "";
+if (window.location.hash === want) return;
+const url = window.location.pathname + window.location.search + want;
+try { window.history.replaceState(null, "", url); } catch (e) { /* ignore */ }
+}, [screen]);
+
+// Back/forward and an externally changed hash both land here. A route is only
+// honoured for someone actually signed in; otherwise it is parked until the
+// PIN succeeds.
+useEffect(() => {
+const onHash = () => {
+const r = routeFromHash();
+if (!r) return;
+if (readSession() && screen!=="pin" && screen!=="nameSelect" && screen!=="timeout") setScreen(r);
+else setPendingRoute(r);
+};
+window.addEventListener("hashchange", onHash);
+return () => window.removeEventListener("hashchange", onHash);
 }, [screen]);
 useEffect(() => {
 const evts=["touchstart","touchmove","click","keydown"];
@@ -1039,6 +1150,19 @@ evts.forEach(e=>window.addEventListener(e,resetTimer));
 resetTimer();
 return ()=>{evts.forEach(e=>window.removeEventListener(e,resetTimer));if(timer.current)clearTimeout(timer.current);};
 }, [resetTimer]);
+
+// Sign out — forget the remembered user and hand the device back to the
+// name picker. The PIN screen is untouched: it is still how anyone gets in.
+const signOut = () => {
+clearSession();
+setIsTeacher(false);
+setStudentName(""); setStudentInstrument(""); setLearningStyle(null);
+setLockedKey(null);
+setSelectedLoginName(""); setPin(""); setPinError(false);
+setPendingRoute(null);
+try { window.history.replaceState(null, "", window.location.pathname + window.location.search); } catch (e) { /* ignore */ }
+setScreen("nameSelect");
+};
 
 // Login: name selected, now show PIN entry
 const handleNameSelect = (name) => {
@@ -1054,9 +1178,13 @@ const next=pin+d; if (next.length>4) return;
 setPin(next); setPinError(false);
 if (next.length===4) {
 setTimeout(()=>{
-if (selectedLoginName==="__teacher__") {
+if (selectedLoginName===TEACHER_ID) {
 if (next===TEACHER_PIN) {
-setPin(""); setIsTeacher(true); setScreen("teacherHome");
+setPin(""); setIsTeacher(true);
+writeSession(TEACHER_ID);
+// A destination asked for before sign-in is honoured now, never dropped.
+const dest = pendingRoute; setPendingRoute(null);
+setScreen(dest || "teacherHome");
 } else { setPinError(true); setTimeout(()=>{setPin("");setPinError(false);},700); }
 } else {
 const student = STUDENTS[selectedLoginName];
@@ -1064,9 +1192,11 @@ if (student && next===student.pin) {
 setPin(""); setIsTeacher(false);
 setStudentName(selectedLoginName);
 setStudentInstrument(student.instrument);
+writeSession(selectedLoginName);
 logActivity(selectedLoginName,{type:"login"});
 const saved=localStorage.getItem(`style_${selectedLoginName}`);
-if (saved){setLearningStyle(saved);setScreen("home");}
+const dest = pendingRoute; setPendingRoute(null);
+if (saved){setLearningStyle(saved);setScreen(dest || "home");}
 else setScreen("stylePick");
 } else { setPinError(true); setTimeout(()=>{setPin("");setPinError(false);},700); }
 }
@@ -1275,7 +1405,44 @@ const TeacherNav = ({active}) => (
 );
 
 // ============================================================
-if (screen==="timeout") return <><style>{S}</style><div className="timeout-screen" onClick={()=>setScreen("nameSelect")}/></>;
+// AUTH GATE — one place, ahead of every screen branch below.
+//
+// A hash route must never be a way past the PIN. A deep link is a shortcut for
+// someone already signed in, not a door: with no session the destination is
+// parked in pendingRoute and the name picker is shown, so #songbook typed on a
+// shared church iPad gets a keypad rather than the songbook. Found on screen
+// during verification — the boot logic guarded this correctly but nothing
+// re-checked it on a plain reload.
+if (screen!=="nameSelect" && screen!=="pin" && screen!=="timeout" && !readSession()) {
+  return (<><style>{S}</style>
+    <div className="name-screen">
+      <div><div className="pin-logo">♩♪♫♬</div><div className="pin-sub">Circle of Fifths</div></div>
+      <div className="name-list">
+        {Object.keys(STUDENTS).map(name => (
+          <button key={name} className="name-btn" onClick={()=>handleNameSelect(name)}>{name}</button>
+        ))}
+      </div>
+      <div className="name-divider">
+        <div className="name-divider-line"/>
+        <div className="name-divider-text">or</div>
+        <div className="name-divider-line"/>
+      </div>
+      <div style={{width:"100%",maxWidth:320}}>
+        <button className="teacher-btn" onClick={()=>handleNameSelect(TEACHER_ID)}>🎓 Teacher Login</button>
+      </div>
+    </div></>);
+}
+
+// ============================================================
+// TIMEOUT — a shared church iPad still locks after 15 minutes, but waking it
+// costs ONE four-digit entry, not two screens: the remembered user goes back
+// to their own PIN pad, and only an unknown/cleared session falls all the way
+// back to the name picker.
+if (screen==="timeout") return <><style>{S}</style><div className="timeout-screen" onClick={()=>{
+const sess=readSession();
+if (sess){ setSelectedLoginName(sess.name); setPin(""); setPinError(false); setScreen("pin"); }
+else setScreen("nameSelect");
+}}/></>;
 
 // NAME SELECT
 if (screen==="nameSelect") return (
@@ -1406,7 +1573,7 @@ if (screen==="teacherHome") return (
 <div className="top-bar">
 <div className="top-name" style={{color:"var(--teacher)"}}>Teacher</div>
 <div className="top-logo">C5</div>
-<button className="ghost-btn" style={{width:"auto",padding:"4px 12px",fontSize:12}} onClick={()=>{setIsTeacher(false);setLockedKey(null);setScreen("nameSelect");}}>Exit</button>
+<button className="ghost-btn" style={{width:"auto",padding:"4px 12px",fontSize:12}} onClick={()=>{clearSession();setIsTeacher(false);setLockedKey(null);setScreen("nameSelect");}}>Exit</button>
 </div>
 <div className="teacher-badge">🎓 Teacher Mode</div>
 {lockedKey ? (
@@ -1429,14 +1596,16 @@ Tap a key on the circle to lock it for students.<br/>
 <div className="leg"><div className="leg-dot" style={{background:"rgba(239,154,154,.6)"}}/> Flat</div>
 <div className="leg"><div className="leg-dot" style={{background:"rgba(192,132,252,.6)"}}/> Locked</div>
 </div>
-<button className="primary-btn" onClick={()=>startRound()}>🎮 Preview This Key</button>
+{/* Songbook first: it is what gets opened on a Sunday, and it used to sit
+    below the fold where it had to be scrolled to. */}
+<button className="primary-btn songbook-btn" onClick={()=>setScreen("songbook")}>🎵 Songbook</button>
+<button className="ghost-btn" onClick={()=>startRound()}>🎮 Preview This Key</button>
 <button className="ghost-btn" onClick={()=>{setActiveTab("lookup");setScreen("lookup");}}>🔍 Look Up a Key</button>
 <button className="ghost-btn" onClick={()=>setScreen("ptModeSelect")}>🇧🇷 Notas em Português</button>
 <button className="ghost-btn" onClick={startChordQuiz}>🎸 Chord Diagrams</button>
 <button className="ghost-btn" onClick={()=>setScreen("bassModeSelect")}>🎸 Bass Fretboard</button>
 <button className="ghost-btn" onClick={()=>setScreen("keyboardStudio")}>🎹 Keyboard Studio</button>
 <button className="ghost-btn" onClick={()=>setScreen("tuner")}>🎯 Tuner</button>
-<button className="ghost-btn" onClick={()=>setScreen("songbook")}>🎵 Songbook</button>
 <button className="teacher-btn" onClick={()=>setScreen("cutCapo")}>🎼 Cut Capo Studio</button>
 <button className="teacher-btn" onClick={()=>setScreen("openVoicings")}>✨ Open Voicings Studio</button>
 <button className="teacher-btn" onClick={()=>setScreen("richVoicings")}>🎹 Rich Voicings Piano Studio</button>
@@ -1467,6 +1636,12 @@ To add, remove, or change a student, update the <code style={{background:"var(--
 </div>
 <div className="sec-lbl" style={{marginTop:8}}>Teacher PIN</div>
 <div style={{fontSize:13,color:"var(--muted)"}}>Set at the top of the code file — look for <code style={{background:"var(--surface2)",padding:"2px 6px",borderRadius:4,fontSize:12}}>TEACHER_PIN</code></div>
+
+<div className="sec-lbl" style={{marginTop:16}}>This device</div>
+<div style={{fontSize:13,color:"var(--muted)",lineHeight:1.6,marginBottom:8}}>
+This iPad stays signed in as Teacher so the songbook is one tap away. Sign out to hand it to someone else — it returns to the name picker and the next person picks their own name.
+</div>
+<button className="ghost-btn" onClick={signOut}>Sign out</button>
 </div>
 <TeacherNav active="settings"/>
 </div></>
@@ -1927,15 +2102,16 @@ return (
 <div className="leg"><div className="leg-dot" style={{background:"#81c784"}}/> 4 & 5 neighbors</div>
 </div>
 <div style={{textAlign:"center",fontSize:12,color:"var(--muted)"}}>One step back = the 4 · One step forward = the 5</div>
-<button className="primary-btn" onClick={()=>startRound()}>🎮 Start Practice</button>
+<button className="primary-btn songbook-btn" onClick={()=>setScreen("songbook")}>🎵 Songbook</button>
+<button className="ghost-btn" onClick={()=>startRound()}>🎮 Start Practice</button>
 <button className="ghost-btn" onClick={()=>{setActiveTab("lookup");setScreen("lookup");}}>🔍 Look Up a Key</button>
 <button className="ghost-btn" onClick={()=>setScreen("ptModeSelect")}>🇧🇷 Notas em Português</button>
 {studentInstrument==="guitar"&&<button className="ghost-btn" onClick={startChordQuiz}>🎸 Chord Diagrams</button>}
 {studentInstrument==="bass"&&<button className="ghost-btn" onClick={()=>setScreen("bassModeSelect")}>🎸 Bass Fretboard</button>}
 {studentInstrument==="keys"&&<button className="ghost-btn" onClick={()=>setScreen("keyboardStudio")}>🎹 Keyboard Studio</button>}
 {studentInstrument!=="keys"&&<button className="ghost-btn" onClick={()=>setScreen("tuner")}>🎯 Tuner</button>}
-<button className="ghost-btn" onClick={()=>setScreen("songbook")}>🎵 Songbook</button>
 <button className="ghost-btn" onClick={()=>setScreen("stylePick")}>Change Learning Style</button>
+<button className="ghost-btn" onClick={signOut}>Sign out</button>
 </div>
 <StudentNav active="circle"/>
 </div></>
