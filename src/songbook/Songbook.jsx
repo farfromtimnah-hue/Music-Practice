@@ -196,6 +196,20 @@ const S = `
 .sb-sheet-top{display:flex;align-items:baseline;gap:10px;margin-bottom:4px;}
 .sb-sheet-name{font-family:'Oswald',sans-serif;font-size:24px;font-weight:700;color:var(--gold,#f0c040);letter-spacing:1px;}
 .sb-sheet-sub{font-size:13px;color:#8888aa;}
+/* The chord popups lead with the SHAPE — what the hands do. It has to carry
+   from music-stand distance, so it is larger than the old header and the
+   sounding chord sits under it, muted and explicitly labelled. */
+.sb-sheet-top-shape{align-items:flex-start;gap:12px;}
+.sb-sheet-ident{min-width:0;}
+.sb-sheet-top-shape .sb-sheet-name{font-size:34px;line-height:1.1;}
+@media (min-width:600px){.sb-sheet-top-shape .sb-sheet-name{font-size:40px;}}
+/* "shape" is the unit, not the name — same line, deliberately quieter so the
+   chord itself is what the eye lands on. */
+.sb-sheet-shapeword{font-size:.5em;font-weight:400;color:#8888aa;letter-spacing:2px;
+  text-transform:uppercase;margin-left:7px;}
+.sb-sheet-sounds{font-size:13px;color:#8888aa;margin-top:3px;line-height:1.4;}
+.sb-sheet-sounds b{color:#c8c8de;font-weight:600;}
+.sb-sheet-top-shape .sb-sheet-close{margin-left:auto;flex:0 0 auto;}
 .sb-sheet-close{margin-left:auto;background:none;border:1px solid #2a2a40;color:#bbb;border-radius:9px;padding:5px 11px;font-size:14px;cursor:pointer;}
 .sb-cc-card{border:1px solid #2a2a40;border-radius:12px;padding:10px 10px 6px;margin-top:12px;background:#0a0a10;}
 .sb-cc-card-top{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#8888aa;margin-bottom:6px;}
@@ -1224,6 +1238,53 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, i
 }
 
 // ============================================================
+// POPUP HEADER — shared by BOTH chord popups, deliberately.
+//
+// WHAT GOES BIG IS THE SHAPE. Mid-song the shape is the actionable fact: it
+// is what the hands do. The sounding chord is context — she has already read
+// it off the chart, which is how she got here.
+//
+// This was the other way round and it caused a real misread on stage: the
+// large gold "Am7" was taken as the chord to play and "play F#m7 shape" in
+// small print underneath was missed entirely. With a capo on, the big name
+// being the one you must NOT grip is a trap.
+//
+// WITH NO CAPO the two names are identical, so only one is shown. Printing
+// "sounds Am7" under a large "Am7" is noise that teaches the eye to skip the
+// second line — exactly the habit that hid the shape in the first place.
+//
+// One component, used by both popups, so the two can never drift apart.
+// ============================================================
+function ChordSheetHead({ shapeLabel, soundingLabel, setup, onClose }) {
+  // "Transposed" is the only thing that matters here: are the two names
+  // actually different? Not whether a capo is on — a cut capo alone raises
+  // three strings and shifts no shape, so its names match and it gets the
+  // single-name treatment too.
+  const differs = !!shapeLabel && !!soundingLabel && shapeLabel !== soundingLabel;
+  return (
+    <div className="sb-sheet-top sb-sheet-top-shape">
+      <div className="sb-sheet-ident">
+        <div className="sb-sheet-name">
+          {shapeLabel || soundingLabel}
+          {differs && <span className="sb-sheet-shapeword"> shape</span>}
+        </div>
+        {/* Secondary line: muted, smaller, and the sounding chord is
+            explicitly LABELLED as sounding so it can never be misread as
+            the thing to play. */}
+        {(differs || setup) && (
+          <div className="sb-sheet-sounds">
+            {differs && <>sounds <b>{soundingLabel}</b></>}
+            {differs && setup ? " · " : ""}
+            {setup}
+          </div>
+        )}
+      </div>
+      <button className="sb-sheet-close" onClick={onClose}>Close</button>
+    </div>
+  );
+}
+
+// ============================================================
 // CHORD POPUP — "how do I play this?", for every capo state that is not the
 // cut capo. The cut capo keeps its own popup below, because its question is a
 // different one (does this chord survive the capo at all?).
@@ -1242,24 +1303,25 @@ function ChordPopup({ token, capoFret = 0, instrument, onClose }) {
   const res = fretted ? guitar : notes;
   const capo = fretted ? guitar.capo : 0;
 
-  // With a capo the chord under the fingers is not the chord on the page, and
-  // both matter: she reads the sounding name off the chart and plays the shape.
-  const sub = !fretted
+  // Keys and bass have no shape to grip, so their header keeps naming the
+  // chord itself — there the sounding name IS the answer.
+  const setup = !fretted
     ? (instrument === "bass" ? "chord tones" : "notes in the chord")
     : guitar.status === "not-a-chord"
       ? ""
       : capo > 0
-        ? "sounding · play " + guitar.shapeLabel + " shape · capo " + capo
-        : "no capo";
+        ? "capo " + capo
+        : "";
 
   return (
     <div className="sb-modal" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="sb-sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="sb-sheet-top">
-          <span className="sb-sheet-name">{(res && (res.soundingLabel || res.label)) || token}</span>
-          <span className="sb-sheet-sub">{sub}</span>
-          <button className="sb-sheet-close" onClick={onClose}>Close</button>
-        </div>
+        <ChordSheetHead
+          shapeLabel={fretted ? (guitar.shapeLabel || null) : null}
+          soundingLabel={(res && (res.soundingLabel || res.label)) || token}
+          setup={setup}
+          onClose={onClose}
+        />
 
         {res.status === "not-a-chord" && (
           <div className="sb-cc-no">
@@ -1293,8 +1355,8 @@ function ChordPopup({ token, capoFret = 0, instrument, onClose }) {
             </div>
             {capo > 0 && (
               <div className="sb-sheet-note">
-                Capo at fret {capo}. The chart says <b>{guitar.soundingLabel}</b>; with the capo on you finger a
-                {" "}<b>{guitar.shapeLabel}</b> shape and it sounds as {guitar.soundingLabel}.
+                Capo at fret {capo}. Finger the <b>{guitar.shapeLabel}</b> shape — the chart says
+                {" "}<b>{guitar.soundingLabel}</b>, and with the capo on that shape is what sounds it.
               </div>
             )}
           </>
@@ -1368,15 +1430,12 @@ function CutCapoPopup({ token, capoSetting, isTeacher, onClose }) {
   return (
     <div className="sb-modal" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="sb-sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="sb-sheet-top">
-          <span className="sb-sheet-name">{result.soundingLabel || token}</span>
-          <span className="sb-sheet-sub">
-            {result.transposed
-              ? "sounding · play " + result.shapeLabel + " shape · " + setup
-              : setup}
-          </span>
-          <button className="sb-sheet-close" onClick={onClose}>Close</button>
-        </div>
+        <ChordSheetHead
+          shapeLabel={result.shapeLabel || null}
+          soundingLabel={result.soundingLabel || token}
+          setup={setup}
+          onClose={onClose}
+        />
 
         {result.status === "not-a-chord" && (
           <div className="sb-cc-no">

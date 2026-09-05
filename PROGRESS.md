@@ -1129,3 +1129,51 @@ Scenario 8 is the one worth flagging: it only exists because the browser test sh
 The `Silence check: skipped` row appearing means the context was suspended at start; tapping should clear it and, if that rung was dead, visibly restart the ladder.
 
 Nothing outside `src/tuner/` was modified: `setStore.js`, `src/songbook/`, `src/cutcapo/` and `src/openvoicings/` are untouched, and `src/tuner/pitch.js` is byte-identical.
+
+---
+
+## The chord popup led with the wrong chord
+
+### What went wrong on stage
+
+Tapping a chord with a capo on produced a popup whose large gold element was the **sounding** chord — "Am7" at 24px — with "play F#m7 shape" in 13px grey underneath. That caused a real misread mid-service: the big yellow Am7 was taken as the chord to play and the shape instruction was missed entirely.
+
+The hierarchy was backwards. Mid-song the **shape is the actionable fact** — it is what the hands do. The sounding chord is context, and she has already read it off the chart; that is how she got to the popup in the first place. With a capo on, putting the name you must NOT grip in the largest, brightest type is a trap.
+
+### The fix
+
+The header is now one shared component, `ChordSheetHead`, used by **both** popups — the standard-capo `ChordPopup` and `CutCapoPopup`. They had identical versions of the same bug and could drift apart again; now there is one place to change.
+
+- The **shape** takes the `.sb-sheet-name` treatment, enlarged from 24px to **34px (40px at ≥600px)** in full gold. The word "shape" rides the same line at half size, uppercase and muted — it is the unit, not the name, so the chord itself is what the eye lands on.
+- The **sounding chord** drops to a 13px muted second line and is explicitly labelled: `sounds Am7 · capo 3 + cut capo at fret 5`. It can no longer be read as an instruction.
+- **With no capo the two names are identical, so only one is shown** — no "shape" suffix, no second line, no capo note. Printing "sounds Am7" under a large "Am7" is noise that teaches the eye to skip the second line, which is the exact habit that hid the shape to begin with.
+
+The single-name rule keys off whether the two labels actually **differ**, not off whether a capo is on. That matters for the cut capo alone: it raises only three strings and shifts no shape, so its names match and it correctly gets the one-name treatment. A full capo is what makes them diverge.
+
+**Keys and bass keep naming the chord**, since there is no single shape to grip — their header shows one name with "notes in the chord" / "chord tones" as the descriptor, and no misleading "shape" wording.
+
+The one body-text change is the standard-capo note, reworded from "The chart says Am7; with the capo on you finger a F#m7 shape" to lead with the action: "Finger the **F#m7** shape — the chart says **Am7**, and with the capo on that shape is what sounds it."
+
+**Presentation only.** `soundingLabel` and `shapeLabel` were already computed correctly by `cutCapoAnswerFor` and `guitarAnswerFor`; only which one is displayed prominently changed. A diff filtered for `cutCapoAnswerFor`, `guitarAnswerFor`, `savedShapesFor`, `saveShapeFor`, `ranked`, `voicings` and `chartName` shows no added or removed line — no chord maths, no G7th chart lookup, no shape ranking, no saved-shape precedence.
+
+### Verified by actually running it
+
+`npx vite build` passes. Everything below was **run in real Chrome as Teacher against the live app** at a 1024×647 viewport, not reasoned about:
+
+- **Sounding key G, full capo 3, cut capo on, tapping Am7** (in "I Lift My Hands", which is in G and contains Am7): the popup leads with **`F#m7 SHAPE`** and reads `sounds Am7 · capo 3 + cut capo at fret 5` beneath. Exactly the required wording.
+- **Same chord with the cut capo OFF**: `F#m7 SHAPE` / `sounds Am7 · capo 3`. Identical hierarchy — the two popups do not diverge.
+- **Capo 0**: Am7, G and F each show ONE name, with no "shape" suffix, no second line and no capo note.
+- **The G7th chart badge, the F#m11 reach-over note and the fallback banner all still appear where they did.** Checked across five chords at capo 3 + cut: G, Em and D carry `standard cut capo chart (G7th)`; Dm7 and F carry `Not on the standard chart — best available shape`; Am7 shows the F#m11 card with "You have to reach over your partial capo, or mute the low E string."
+- **A pinned shape still wins and is still marked as hers.** Pinned one through the real editor on Am7: card order came back `["MINE","chart"]` with the `MY SHAPE` badge and Edit/Delete intact, ranked above the G7th chart shape. Deleted afterwards; `cutCapoShapes` back to 0.
+- **Readable at a glance**: computed styles measured on the live element — the shape name renders at **40px in `rgb(240,192,64)`** against **13px in `rgb(136,136,170)`** for the sounding line. A 3× size ratio plus a strong contrast split, where previously the *sounding* chord held the 24px gold slot.
+- **Keys and bass** were checked by signing in as each (Lara, keys; Bernardo, bass): both show a single "Am7" with "notes in the chord" / "chord tones" and no spurious second line.
+- **Edge cases** run against the real answer functions: `not-a-chord` tokens ("Deus", "Bad", "Cmaj13#11") render the raw token with no "shape" word and no "sounds" line, in both popups.
+- **Layout**: at a 360px-wide sheet the name and the Close button do not collide and the sounding line fits without overflowing.
+
+### Caveats
+
+The iPad viewport check is a measurement against the viewport this harness reports (1024×647), not a genuinely different device box — `resize_window` moves the OS window without changing the inner viewport here, as recorded in earlier entries. The narrow-screen check was therefore done by constraining the sheet's own width rather than by actually rendering at a phone viewport, so the `@media (max-width:599px)` full-screen sheet rule was **not** exercised. The 40px figure is the ≥600px branch; the ≤599px branch renders 34px and was not seen on screen.
+
+"Readable from music-stand distance" is asserted from type size and contrast, not from anyone standing at a music stand. That last step is hers.
+
+Nothing outside `src/songbook/Songbook.jsx` was modified: `setStore.js`, `src/tuner/`, `src/cutcapo/` and `src/openvoicings/` are untouched.
