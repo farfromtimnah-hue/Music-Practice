@@ -61,6 +61,11 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
   const [lockedIndex, setLockedIndex] = useState(-1); // manual override
   const [listening, setListening] = useState(true);   // false while a tone plays
   const [diag, setDiag] = useState({ frequency: null, clarity: null, ok: false });
+  // Which constraint set actually produced audio, what the device really
+  // applied, and every rung tried on the way. Surfaced in the diagnostic:
+  // a fallback that happens invisibly is how this bug survived a release.
+  const [capture, setCapture] = useState(null);
+  const [probing, setProbing] = useState(null);   // rung being tried right now
   // iOS may hand back a SUSPENDED AudioContext: the mic is granted (the
   // recording indicator lights) but no samples ever arrive. Track that
   // separately from "muted" so the UI can say which one is happening.
@@ -141,22 +146,33 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
     setStatus("starting");
     setErrorReason(null);
     const audio = new TunerAudio();
+    setCapture(null);
     try {
-      // THE ONE DIFFERENCE BETWEEN THE MODES, part 1: which constraints
-      // we ask for. Mode B needs echo cancellation because the tone and
-      // the mic overlap; Mode A never hears its own tone.
-      await audio.start(micMode === "continuous" ? CONSTRAINTS_CONTINUOUS : CONSTRAINTS_PAUSE);
+      // THE ONE DIFFERENCE BETWEEN THE MODES, part 1: which LADDER we
+      // walk. Mode B leads with echo cancellation because the tone and
+      // the mic overlap; Mode A leads with raw capture, which it can
+      // afford because it never hears its own tone. Both fall back
+      // through the same rungs, because on iOS the preferred rung can
+      // hand back a stream that delivers nothing at all.
+      await audio.start(
+        micMode === "continuous" ? CONSTRAINTS_CONTINUOUS : CONSTRAINTS_PAUSE,
+        (rung, i, n) => { if (!deadRef.current) setProbing({ label: rung.label, i: i + 1, n }); }
+      );
       // The user may have hit Back while getUserMedia was still resolving.
       // Nothing owns this stream now, so release it here or the mic light
       // stays on until the page is refreshed.
       if (deadRef.current) { audio.stop(); return; }
       audioRef.current = audio;
+      setProbing(null);
+      setCapture({ chosen: audio.chosen, attempts: audio.attempts, probeSkipped: audio.probeSkipped });
       setNeedsTap(!audio.isRunning);
       setStatus("running");
       rafRef.current = requestAnimationFrame(loop);
     } catch (err) {
       audio.stop();
       if (deadRef.current) return;
+      setProbing(null);
+      setCapture({ chosen: null, attempts: audio.attempts, probeSkipped: audio.probeSkipped });
       setErrorReason(err.reason || "unsupported");
       setStatus("error");
     }
@@ -174,13 +190,26 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
 
   /* iOS only honours AudioContext.resume() inside a real gesture handler,
      and the mount-time start() is not one. Retry on the next genuine tap
-     anywhere in the tuner, then stop listening once audio is flowing. */
+     anywhere in the tuner, then stop listening once audio is flowing.
+
+     The resume is also the FIRST moment the stream can be judged: while
+     the context was suspended the analyser read zeros no matter how good
+     the track was, so the ladder had to keep its first rung unprobed. If
+     that rung turns out to be the silent one, re-run the whole ladder now
+     that silence actually means something — otherwise an iOS cold start
+     would settle on a dead stream and never reconsider. */
   useEffect(() => {
     if (!needsTap) return undefined;
     const onGesture = async () => {
       const audio = audioRef.current;
       if (!audio) return;
-      if (await audio.ensureRunning()) setNeedsTap(false);
+      if (await audio.ensureRunning()) {
+        setNeedsTap(false);
+        const verdict = await audio.probeAfterResume();
+        if (deadRef.current) return;
+        if (verdict === "silent") { stopAudio(); startAudio(); return; }
+        setCapture({ chosen: audio.chosen, attempts: audio.attempts, probeSkipped: audio.probeSkipped });
+      }
     };
     window.addEventListener("pointerdown", onGesture);
     window.addEventListener("touchend", onGesture);
@@ -188,6 +217,7 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
       window.removeEventListener("pointerdown", onGesture);
       window.removeEventListener("touchend", onGesture);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [needsTap]);
 
   /* Mic is requested when the tuner opens, and released on the way out —
@@ -310,6 +340,12 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
         ? "The tuner needs your microphone to hear the string. Your browser blocked it — allow microphone access for this site, then tap Try Again."
         : errorReason === "notfound"
         ? "No microphone was found on this device. The tuner needs a mic to hear the string."
+        : errorReason === "silent"
+        // Every constraint set was granted and every one delivered pure
+        // silence. Naming it precisely matters: the mic indicator is lit,
+        // so "no microphone" would be plainly wrong and send her hunting
+        // in the wrong settings panel.
+        ? "The microphone is on but no sound is reaching the tuner — every capture setting this device offered came back silent. Close any other app that might be using the mic, then tap Try Again."
         : "This browser can't reach the microphone. Try Chrome or Safari, and make sure the page is on https.";
     return (
       <><style>{TUNER_CSS}</style>
@@ -523,7 +559,12 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
               className="tn-tapwake"
               onClick={async () => {
                 const audio = audioRef.current;
-                if (audio && (await audio.ensureRunning())) setNeedsTap(false);
+                if (!audio || !(await audio.ensureRunning())) return;
+                setNeedsTap(false);
+                const verdict = await audio.probeAfterResume();
+                if (deadRef.current) return;
+                if (verdict === "silent") { stopAudio(); startAudio(); return; }
+                setCapture({ chosen: audio.chosen, attempts: audio.attempts, probeSkipped: audio.probeSkipped });
               }}
             >
               Microphone is on but no audio is reaching the tuner — tap to enable
@@ -558,11 +599,77 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
                 {needsTap ? "suspended" : "running"}
               </strong>
             </div>
+
+            {/* WHICH CONSTRAINT SET ACTUALLY PRODUCED AUDIO. The whole
+                point: a silent first choice used to fail invisibly, and
+                what iOS applies is not what was asked for. */}
+            <div className="tn-diag-row">
+              <span>Capture</span>
+              <strong className={capture && capture.chosen ? "ok" : "no"}>
+                {probing
+                  ? `trying ${probing.i}/${probing.n}: ${probing.label}`
+                  : capture && capture.chosen
+                  ? capture.chosen.label + (capture.chosen.probed ? "" : " (unprobed)")
+                  : "—"}
+              </strong>
+            </div>
+            {capture && capture.chosen && capture.chosen.probed && (
+              <div className="tn-diag-row">
+                <span>Signal peak</span>
+                <strong>{capture.chosen.peak.toExponential(2)}</strong>
+              </div>
+            )}
+            {capture && capture.probeSkipped && (
+              <div className="tn-diag-row">
+                <span>Silence check</span>
+                <strong className="no">skipped — context suspended</strong>
+              </div>
+            )}
+            {/* What the DEVICE applied, not what we asked for. iOS ignores
+                constraints it does not honour rather than erroring. */}
+            {capture && capture.chosen && capture.chosen.settings && (
+              <div className="tn-diag-row">
+                <span>Applied</span>
+                <strong>{describeSettings(capture.chosen.settings)}</strong>
+              </div>
+            )}
+            {/* Every rung tried, so a fallback is never invisible. */}
+            {capture && capture.attempts && capture.attempts.length > 1 && (
+              <div className="tn-diag-row tn-diag-stack">
+                <span>Fallback</span>
+                <strong>
+                  {capture.attempts.map((a, i) => (
+                    <span key={i} className={a.outcome === "audio" ? "ok" : "no"}>
+                      {a.label}: {a.outcome === "audio" ? "audio" : a.outcome === "silent" ? "SILENT" : a.outcome === "rejected" ? "rejected (" + a.error + ")" : a.outcome}
+                      {a.settings ? " [" + describeSettings(a.settings) + "]" : ""}
+                    </span>
+                  ))}
+                </strong>
+              </div>
+            )}
           </div>
         </div>
       )}
     </div></>
   );
+}
+
+/**
+ * Render what the device ACTUALLY applied. iOS ignores constraints it
+ * does not honour rather than erroring, so the only trustworthy record
+ * is the read-back — and `undefined` (the device declined to say) is
+ * shown as "?" rather than being quietly folded into "off".
+ */
+function describeSettings(s) {
+  const flag = (v) => (v === true ? "on" : v === false ? "off" : "?");
+  const bits = [
+    "AEC " + flag(s.echoCancellation),
+    "NS " + flag(s.noiseSuppression),
+    "AGC " + flag(s.autoGainControl),
+  ];
+  if (s.channelCount != null) bits.push(s.channelCount + "ch");
+  if (s.sampleRate != null) bits.push(s.sampleRate + "Hz");
+  return bits.join(" · ");
 }
 
 function TunerHeader({ onBack, title }) {

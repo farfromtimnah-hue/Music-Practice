@@ -1059,3 +1059,73 @@ Enharmonic spelling of the parenthesised letters follows the **playing key's** a
 `songbook_chartkey_` is a new localStorage key with no eviction path of its own; it is cleared by its own one-tap reset but is **not** touched by the set list's "Reset to Planning Center", which deliberately clears only playing keys — a corrected chart key is a fact about the chart, not about today's set, and should survive the reset. That is the intended behaviour but it is worth knowing it is there.
 
 The set fetching, caching and refresh logic was not touched: `setStore.js` is byte-identical, and nothing in `src/tuner/`, `src/cutcapo/` or `src/openvoicings/` was modified.
+
+---
+
+## The tuner detects nothing: a silent iOS stream, and a pipeline that gates guitars
+
+### What was observed on the iPad
+
+With the AudioContext fixes (d234424, 35b1623) live and working — the diagnostic reading `Audio: running`, `Mic: open`, the recording indicator lit:
+
+- **Mode A (Pause Cycle, the default): nothing detected.** Not a guitar, not a voice, not shouting. Detected and Clarity both blank.
+- **Mode B (Continuous): a sung note detected. The guitar still did not.**
+
+The only difference between the two paths was the `echoCancellation` constraint. Two separate faults were stacked on that one flag.
+
+**1. `echoCancellation:false` yields a SILENT STREAM on iOS Safari.** Asking for raw capture gets a track handed back happily that then delivers nothing but zeros for ever. iOS does not reject the constraint, so nothing anywhere reports a problem — permission granted, context running, indicator lit, buffer empty. That is Mode A, and it is why the default mode detected nothing at all.
+
+**2. `echoCancellation:true` routes capture through iOS voice processing.** Aggressive high-pass plus noise gating, which treats a held guitar note as stationary background and gates it away while passing speech cleanly. That is exactly the reported asymmetry: singing detects, the guitar does not.
+
+Neither extreme works, so a flag was the wrong shape for the fix.
+
+### The fix: a ladder, and proof that audio actually arrives
+
+`CONSTRAINTS_PAUSE` and `CONSTRAINTS_CONTINUOUS` are now **ordered ladders** rather than single objects. Each rung is asked for, wired up, and **proved to deliver non-zero samples** before it is accepted; a rung that comes back silent is torn down and the next is tried. The rungs are: raw (no AEC/NS/AGC, mono) → raw without the extra hints → **AEC on with noiseSuppression and autoGainControl explicitly off** → device defaults. Mode B leads with the AEC rung, because there the tone and the mic overlap and cancellation is the only thing stopping the tone swamping the string; raw still follows, because a silent stream is worse than an un-cancelled one.
+
+The third rung is the important one and is the direct answer to fault 2: keep the pipeline that demonstrably delivers samples on this hardware, but ask it not to gate what it is passing. A sustained 30.87 Hz low B is precisely what a speech denoiser throws away.
+
+**`probePeak()` is the whole point.** It reads the analyser for up to 400ms and returns the largest absolute sample seen, bailing the instant the stream proves alive so only a genuinely dead one pays the full window. The floor is `1e-5` — deliberately just above zero rather than a signal-level threshold, because this check answers one question only: *is this track delivering samples at all?* A quiet room must read as alive, since gating a quiet room out here would silently drop the tuner to a worse rung.
+
+**A suspended context is not silence.** No samples flow while an AudioContext is suspended regardless of how good the track is, so judging a rung there would send us down the ladder for the wrong reason and land on a worse rung on every iOS cold start. A rung is only rejected when the context is genuinely `running` and the analyser still reads zeros. When the context cannot be resumed without a gesture the first rung is kept **unprobed**, the diagnostic says so, and `probeAfterResume()` runs the check on the tap that finally resumes the context — restarting the whole ladder if that rung turns out to be the silent one. Without that last piece an iOS cold start would settle onto a dead rung and never reconsider, which is the original bug wearing a different hat. This was not in the first draft; the browser test below is what exposed it.
+
+**What the device actually applied is read back, not assumed.** iOS ignores constraints it does not honour rather than erroring, so `MediaStreamTrack.getSettings()` is recorded for every rung and shown in the diagnostic as `AEC on · NS off · AGC off · 1ch · 48000Hz`. `undefined` renders as `?` rather than being folded into "off" — the device declining to say is not the same as the device saying no. `channelCount:1` is requested because on some iOS versions it selects a different capture path.
+
+**Nothing about the fallback is invisible.** The diagnostic gained a `Capture` row naming the rung that produced audio (live progress while probing), `Signal peak`, `Applied`, a `Silence check: skipped — context suspended` row, and a `Fallback` block listing every rung tried with its outcome and its applied settings. When every rung comes back silent the tuner now fails with a specific message — "The microphone is on but no sound is reaching the tuner" — rather than sitting there looking healthy and detecting nothing.
+
+**`pitch.js` is byte-identical.** `CLARITY_THRESHOLD`, `LOWPASS_HZ`, `LOWPASS_POLES`, `MAX_FREQ` and `hasEnergyAt` are untouched, as instructed. Detection maths is not the problem: a voice detects through the same code and synthesised plucks detect in node. The audio never arrived, or arrived gated.
+
+### Verified — and what was NOT
+
+`npx vite build` passes.
+
+**This has NOT been tested on an iPad, and the central claim is therefore unverified.** Whether `echoCancellation:true` with `noiseSuppression:false` and `autoGainControl:false` actually lets a guitar through iOS's pipeline is the entire hypothesis behind rung 3, and it can only be settled on the hardware. What follows is what could genuinely be checked here.
+
+**The browser gave nothing on the audio path — worse than last session, and now measured.** `getUserMedia` hangs unresolved with `navigator.permissions.query({name:'microphone'})` stuck at `prompt` and `enumerateDevices()` returning one unlabelled input. More decisively, `navigator.userActivation.hasBeenActive` reads **false** even after the harness issues clicks, so `AudioContext.resume()` never resolves and **no AudioContext in this environment can ever reach `running`**. That rules out any real-analyser test of the probe: with a suspended context, a working stream and a dead one both read exactly zero — which is, incidentally, a live demonstration of the confound the ladder now guards against.
+
+**What the real browser did confirm.** The real `Tuner` was mounted against a stubbed `getUserMedia` returning genuine `MediaStreamDestination` streams. The ladder ran end to end: 8 `getUserMedia` calls (4 rungs × React StrictMode double-mount), every rung judged silent, and the new `silent` error message rendered — the all-rungs-dead path working in a real browser. The `Capture` diagnostic row rendered and reported live progress (`trying 1/4: raw (no AEC/NS/AGC, mono)`). The successful-fallback rows (`Signal peak`, `Applied`, `Fallback`) could **not** be rendered, because no rung can be made to deliver audio here.
+
+**The ladder logic itself was tested exhaustively in node**, driving the real `TunerAudio.start()` against a stubbed Web Audio layer. Nine scenarios, all passing:
+
+1. **The reported iPad symptom** — raw silent, AEC live: both raw rungs identified as SILENT (peak 0.00e+0), falls through to `AEC on, NS/AGC off`, peak 2.00e-1. Silent stream identified: yes. Fallback acquired a working stream: yes.
+2. **Healthy device** — first rung delivers audio, one rung tried, no fallback.
+3. **Every rung silent** — throws `reason: "silent"` rather than returning a dead tuner.
+4. **Suspended context** — probe skipped, first rung kept, exactly 1 rung tried; does not walk the ladder for the wrong reason.
+5. **Mode B** leads with the AEC rung and stops there.
+6. **Denied permission** short-circuits: exactly 1 `getUserMedia` call, not 4.
+7. **An overconstrained rung** falls through to the next rather than aborting.
+8. **iOS cold start** — suspended at start (rung kept unprobed), tap resumes, `probeAfterResume()` returns `silent`, the caller restarts, and the restart lands on a live rung.
+9. **`probeAfterResume()` is a no-op** on an already-settled rung.
+
+Scenario 8 is the one worth flagging: it only exists because the browser test showed the suspended-context path was a dead end in the first draft.
+
+### What to check on the iPad
+
+1. Open the tuner as Teacher and read the **Capture** row. It names the rung that actually produced audio and shows what iOS applied — that is the answer to "what does this device really do", which several rounds of guessing have not produced.
+2. Read the **Fallback** block. If it shows `raw ... -> SILENT` followed by `AEC on, NS/AGC off -> audio`, fault 1 is confirmed and the fallback is working.
+3. **Play a guitar string in Mode A.** If it detects, rung 3 defeats the voice-processing gate and both faults are fixed. If a voice detects and the guitar still does not, fault 2 survives the `noiseSuppression:false` request — meaning iOS is gating regardless of the constraint, and the `Applied` row will show whether it even honoured it.
+4. If the tuner shows "no sound is reaching the tuner", every rung came back silent and the `Fallback` block says what each one applied — send that.
+
+The `Silence check: skipped` row appearing means the context was suspended at start; tapping should clear it and, if that rung was dead, visibly restart the ladder.
+
+Nothing outside `src/tuner/` was modified: `setStore.js`, `src/songbook/`, `src/cutcapo/` and `src/openvoicings/` are untouched, and `src/tuner/pitch.js` is byte-identical.

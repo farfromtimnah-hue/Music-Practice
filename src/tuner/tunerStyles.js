@@ -118,6 +118,13 @@ export const TUNER_CSS = `
 .tn-diag-row strong{font-family:'Oswald',sans-serif;color:var(--text);font-weight:500;}
 .tn-diag-row strong.ok{color:var(--green);}
 .tn-diag-row strong.no{color:var(--dim);}
+/* The capture rows carry long values (applied constraints, one line per
+   ladder rung). They wrap and align left instead of being squeezed into
+   the right-hand column — this is the row the whole fix is read from. */
+.tn-diag-row strong{text-align:right;max-width:62%;overflow-wrap:anywhere;}
+.tn-diag-stack{flex-direction:column;align-items:stretch;gap:3px;}
+.tn-diag-stack strong{max-width:100%;text-align:left;display:flex;flex-direction:column;gap:2px;
+  font-size:11px;line-height:1.45;}
 
 /* permission / error */
 .tn-perm{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
