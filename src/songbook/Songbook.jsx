@@ -5,6 +5,7 @@ import { matchSetItem, pickChart } from "./match.js";
 import { SERVICE_TYPES, STUDENT_SERVICE_IDS, defaultDateFor, readCachedSet, fetchSet, sameSongs } from "./setStore.js";
 import { toNashville, keyLegend, capoLabel, keyName, parseKeyName, transposedKeyName, KEY_LIST } from "./chords.js";
 import { abbreviationsFor } from "./sections.js";
+import { readOverride, writeOverride, clearOverride, readKeyOverride, writeKeyOverride, clearKeyOverrides, basisOf, basisDiffers } from "./overrideStore.js";
 import { cutCapoAnswerFor, normalizeCapoSetting, cutFretOf, MAX_FULL_CAPO } from "./cutcapoAdapter.js";
 import { guitarAnswerFor, chordNotesFor } from "./chordshapes.js";
 import CutCapoDiagram from "./CutCapoDiagram.jsx";
@@ -45,6 +46,34 @@ const S = `
 .sb-item-lang{margin-left:auto;font-size:11px;letter-spacing:1px;color:#8888aa;border:1px solid #2a2a40;border-radius:6px;padding:2px 6px;}
 .sb-hit{font-size:13px;color:#ccc;margin-top:3px;font-style:italic;}
 .sb-hit b{color:var(--gold,#f0c040);font-style:normal;}
+/* ---- set overrides: the room's version of the set ---- */
+.sb-ov-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 4px;}
+.sb-ov-flag{display:inline-flex;align-items:center;gap:6px;background:rgba(240,192,64,.12);border:1.5px solid var(--gold,#f0c040);color:var(--gold,#f0c040);border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;}
+.sb-ov-flag .dot{width:7px;height:7px;border-radius:50%;background:var(--gold,#f0c040);}
+/* Every override control is a full-size touch target: these get used in a
+   rush, standing up, holding an instrument. 44px is the floor. */
+.sb-ov-btn{min-height:44px;background:#0e0e16;border:1.5px solid #2a2a40;color:#ccc;border-radius:12px;padding:10px 14px;font-size:14px;font-family:inherit;cursor:pointer;}
+.sb-ov-btn.on{border-color:var(--gold,#f0c040);color:var(--gold,#f0c040);background:rgba(240,192,64,.08);}
+.sb-ov-btn.danger{border-color:#7a2c2a;color:#ff8a80;}
+/* PC-changed notice: non-blocking on purpose. It must never stand between her
+   and the set during a service — it informs, it does not interrupt. */
+.sb-pc-notice{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#12161f;border:1.5px solid #35507a;border-radius:12px;padding:10px 12px;margin:8px 0;font-size:13px;color:#cfe0ff;}
+.sb-pc-notice b{color:#8fb8ff;}
+.sb-row-edit{display:flex;gap:6px;align-items:center;margin-left:auto;}
+/* Up/down are the dependable path on an iPad: dragging while holding a guitar
+   is unreliable, so the buttons are deliberately large and always present. */
+.sb-move{min-width:44px;min-height:44px;background:#141826;border:1.5px solid #2a2a40;color:#dfe4f5;border-radius:10px;font-size:18px;line-height:1;cursor:pointer;touch-action:manipulation;}
+.sb-move:disabled{opacity:.3;cursor:default;}
+.sb-move.rm{border-color:#7a2c2a;color:#ff8a80;font-size:15px;}
+/* The key is tapped in a hurry during rehearsal, so it gets a full 44px
+   target like the move buttons rather than sizing to its 1-3 characters. */
+.sb-key-btn{min-width:44px;min-height:44px;background:#0e0e16;border:1.5px solid #2a2a40;color:var(--gold,#f0c040);border-radius:10px;padding:5px 8px;font-size:15px;font-family:'Oswald',sans-serif;letter-spacing:1px;cursor:pointer;touch-action:manipulation;}
+.sb-key-btn.changed{border-color:var(--gold,#f0c040);background:rgba(240,192,64,.12);}
+.sb-item.dragging{opacity:.45;}
+.sb-item.dragover{border-color:var(--gold,#f0c040);}
+.sb-item-added{font-size:11px;letter-spacing:1px;color:#81c784;border:1px solid #2e5e33;border-radius:6px;padding:2px 6px;margin-left:6px;}
+.sb-add-list{max-height:46vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-top:10px;}
+.sb-pos-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:13px;color:#8888aa;}
 /* chart */
 /* Chart pane: header rows are fixed height, the chart body takes the rest and
    the auto-fit measures THAT box, not the viewport. min-height:0 is what lets
@@ -979,13 +1008,142 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
   const results = useMemo(() => search(index, query), [index, query]);
   const service = SERVICE_TYPES.find((s) => s.id === serviceId);
 
-  // The songs of the set that actually have a chart, in the sequence order
-  // the endpoint returned. This is what prev/next walks; songs with no chart
+  // Planning Center's own running order: the songs of the set that actually
+  // have a chart, in the sequence the endpoint returned. Songs with no chart
   // in the library are skipped, since there is nothing to open for them.
-  const setSongs = useMemo(() => items
+  const pcSongs = useMemo(() => items
     .map((it) => { const e = it.match.entry; const c = e && pickChart(e, library, serviceId); return c ? { entry: e, chartId: c.id, title: it.match.title } : null; })
     .filter(Boolean),
     [items, serviceId]);
+
+  // ---------------------------------------------------------------------
+  // OVERRIDE — the room's running order, when rehearsal changed it.
+  // Reloaded whenever the service or date changes, so one service's override
+  // can never appear under another's.
+  // ---------------------------------------------------------------------
+  const [override, setOverride] = useState(() => readOverride(serviceId, date));
+  const [pcChanged, setPcChanged] = useState(false);
+  const [reordering, setReordering] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [keyFor, setKeyFor] = useState(null);   // chartId whose key is being set
+  const [dragIdx, setDragIdx] = useState(null);
+  const [dragOver, setDragOver] = useState(null);
+  const [addQuery, setAddQuery] = useState("");
+  const [addAt, setAddAt] = useState(0);
+  // Bumped whenever a key override is written, so rows re-read localStorage.
+  const [keyTick, setKeyTick] = useState(0);
+
+  useEffect(() => {
+    setOverride(readOverride(serviceId, date));
+    // NOTE: pcChanged is deliberately NOT reset here. It is derived below from
+    // (override, pcSongs) and owned entirely by that effect. Clearing it here
+    // raced the derivation on a cold load — both effects run on mount, this one
+    // last — so a page opened fresh with Planning Center already changed showed
+    // no notice at all. Found on screen: the override survived, but she was
+    // never told PC had moved, which is half the guarantee missing.
+    setReordering(false);
+    setAddOpen(false);
+    setKeyFor(null);
+    setAddQuery("");
+    setDragIdx(null);
+    setDragOver(null);
+  }, [serviceId, date]);
+
+  // A song the override references, resolved back to a live library entry.
+  // Anything that no longer resolves is dropped rather than rendered broken.
+  const resolveItem = useCallback((it) => {
+    const chart = library.charts[it.chartId];
+    if (!chart) return null;
+    const entry = library.songs.find((sg) => sg.charts.includes(it.chartId));
+    if (!entry) return null;
+    return { entry, chartId: it.chartId, title: it.title || chart.names.primary, added: !!it.added };
+  }, []);
+
+  // THE running order. Everything downstream — the list, the swipe navigation,
+  // prev/next — reads this one value, so an override cannot be applied to the
+  // display and forgotten by the navigation.
+  const setSongs = useMemo(() => {
+    if (!override) return pcSongs;
+    return override.items.map(resolveItem).filter(Boolean);
+  }, [override, pcSongs, resolveItem]);
+
+  // Did Planning Center change under an active override? Compared against the
+  // basis the override was BUILT on, never against the previous render, so a
+  // background refetch of an unchanged set stays silent.
+  useEffect(() => {
+    if (!override || !setData) { setPcChanged(false); return; }
+    setPcChanged(basisDiffers(override.basis, basisOf(pcSongs)));
+  }, [override, pcSongs, setData]);
+
+  // Write an override built from the CURRENT running order plus one edit.
+  // The basis is always what PC says right now, so accepting a PC change and
+  // then reordering does not immediately re-flag as changed.
+  const commitOrder = useCallback((nextSongs) => {
+    const itemsOut = nextSongs.map((sg) => ({ chartId: sg.chartId, entryId: sg.entry.id, title: sg.title, added: !!sg.added }));
+    writeOverride(serviceId, date, itemsOut, basisOf(pcSongs));
+    setOverride(readOverride(serviceId, date));
+  }, [serviceId, date, pcSongs]);
+
+  const moveSong = useCallback((from, to) => {
+    if (to < 0 || to >= setSongs.length || from === to) return;
+    const next = setSongs.slice();
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    commitOrder(next);
+  }, [setSongs, commitOrder]);
+
+  const removeSong = useCallback((idx) => {
+    const next = setSongs.slice();
+    next.splice(idx, 1);
+    commitOrder(next);
+  }, [setSongs, commitOrder]);
+
+  // Insert a library song at a position. `at` of -1 means append.
+  const addSong = useCallback((entry, chartId, at) => {
+    const chart = library.charts[chartId];
+    if (!chart) return;
+    const row = { entry, chartId, title: chart.names.primary, added: true };
+    const next = setSongs.slice();
+    if (at == null || at < 0 || at > next.length) next.push(row);
+    else next.splice(at, 0, row);
+    commitOrder(next);
+    setAddOpen(false);
+  }, [setSongs, commitOrder]);
+
+  // Back to Planning Center: the order, the added and removed songs, and the
+  // key overrides for every chart in play. Capo settings are deliberately left
+  // alone — a capo is a fact about the guitar, not about the set.
+  const resetToPlanningCenter = useCallback(() => {
+    const touched = [...new Set([...pcSongs.map((sg) => sg.chartId), ...setSongs.map((sg) => sg.chartId)])];
+    clearKeyOverrides(touched);
+    clearOverride(serviceId, date);
+    setOverride(null);
+    setPcChanged(false);
+    setReordering(false);
+    setKeyTick((t) => t + 1);
+  }, [serviceId, date, pcSongs, setSongs]);
+
+  // Adopt whatever Planning Center now says, discarding the override. Only
+  // ever called from the notice, by an explicit tap.
+  const acceptPlanningCenter = useCallback(() => {
+    clearOverride(serviceId, date);
+    setOverride(null);
+    setPcChanged(false);
+  }, [serviceId, date]);
+
+  // Any key override in force on the current running order?
+  const anyKeyOverride = useMemo(() => {
+    void keyTick;
+    return setSongs.some((sg) => !!readKeyOverride(sg.chartId));
+  }, [setSongs, keyTick]);
+
+  const addResults = useMemo(() => (addQuery.trim().length >= 2 ? search(index, addQuery).slice(0, 40) : []), [index, addQuery]);
+
+  const setKeyForChart = useCallback((chartId, name) => {
+    writeKeyOverride(chartId, name);
+    setKeyTick((t) => t + 1);
+    setKeyFor(null);
+  }, []);
 
   if (open) {
     // Position is found by entry, so switching language/version inside a song
@@ -1032,6 +1190,37 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
         </div>
       )}
 
+      {/* Planning Center moved under an active override. Non-blocking by
+          design: it tells her and waits, because discarding a rehearsal
+          decision on her behalf mid-service is the failure this guards. */}
+      {pcChanged && (
+        <div className="sb-pc-notice">
+          <span><b>Planning Center changed.</b> Your rehearsal order is still what is showing.</span>
+          <button className="sb-ov-btn" onClick={acceptPlanningCenter}>Load from Planning Center</button>
+          <button className="sb-ov-btn" onClick={() => setPcChanged(false)}>Keep mine</button>
+        </div>
+      )}
+
+      {/* Override controls. Teacher only: students read the set, they do not
+          rewrite the running order for the room. */}
+      {isTeacher && !query.trim() && (
+        <div className="sb-ov-bar">
+          {(override || anyKeyOverride) && (
+            <span className="sb-ov-flag"><span className="dot" />
+              {override && anyKeyOverride ? "Custom order · key changed"
+                : override ? "Custom order" : "Key changed"}
+            </span>
+          )}
+          <button className={"sb-ov-btn" + (reordering ? " on" : "")} onClick={() => setReordering((v) => !v)}>
+            {reordering ? "Done" : "Edit set"}
+          </button>
+          {reordering && <button className="sb-ov-btn" onClick={() => setAddOpen(true)}>+ Add song</button>}
+          {(override || anyKeyOverride) && (
+            <button className="sb-ov-btn danger" onClick={resetToPlanningCenter}>Reset to Planning Center</button>
+          )}
+        </div>
+      )}
+
       <div style={{ margin: "10px 0" }}>
         <input type="search" placeholder="Search title or lyrics (EN or PT)…" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
@@ -1055,21 +1244,135 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
           {loading && !setData && <div className="sb-empty">Loading this week's set…</div>}
           {!loading && setData && !setData.found && <div className="sb-empty">No plan in Planning Center for this service on {weekdayLabel(date)}.</div>}
           {!loading && !setData && disconnected && <div className="sb-empty">Nothing cached for this service yet. Search still works across the whole library.</div>}
-          {items.map((it, i) => {
-            const e = it.match.entry;
-            const chart = e ? pickChart(e, library, serviceId) : null;
+          {/* THE running order — setSongs, so the list and the swipe navigation
+              can never disagree about what order the set is in. */}
+          {setSongs.map((sg, i) => {
+            const chart = library.charts[sg.chartId];
+            const ovKey = (void keyTick, readKeyOverride(sg.chartId));
+            const shownKey = ovKey || (chart && chart.key ? chart.key.tonic + (chart.key.mode === "minor" ? "m" : "") : null);
+            const alts = [sg.entry.pt, sg.entry.en].filter((n) => n && n !== sg.title).join(" · ");
             return (
-              <button className="sb-item" key={i} disabled={!e} onClick={() => e && setOpen({ entry: e, chartId: chart.id, fromSet: true })}>
+              <div key={sg.chartId + ":" + i}
+                className={"sb-item" + (dragIdx === i ? " dragging" : "") + (dragOver === i ? " dragover" : "")}
+                draggable={reordering}
+                onDragStart={reordering ? () => setDragIdx(i) : undefined}
+                onDragOver={reordering ? (ev) => { ev.preventDefault(); setDragOver(i); } : undefined}
+                onDrop={reordering ? (ev) => { ev.preventDefault(); if (dragIdx != null) moveSong(dragIdx, i); setDragIdx(null); setDragOver(null); } : undefined}
+                onDragEnd={reordering ? () => { setDragIdx(null); setDragOver(null); } : undefined}>
                 <span className="sb-num">{i + 1}</span>
-                <div style={{ flex: 1 }}>
-                  <div className="sb-item-title">{it.match.title}</div>
-                  {e ? <div className="sb-item-sub">{[e.pt, e.en].filter((n) => n && n !== it.match.title).join(" · ")}{chart && chart.key ? " · " + chart.key.tonic : ""}</div>
-                     : <div className="sb-item-sub" style={{ color: "#c9a24a" }}>chart not in library</div>}
+                <div style={{ flex: 1, cursor: reordering ? "default" : "pointer" }}
+                  onClick={() => { if (!reordering) setOpen({ entry: sg.entry, chartId: sg.chartId, fromSet: true }); }}>
+                  <div className="sb-item-title">{sg.title}{sg.added && <span className="sb-item-added">ADDED</span>}</div>
+                  <div className="sb-item-sub">{alts}</div>
                 </div>
-                {chart && <span className="sb-item-lang">{chart.lang.toUpperCase()}</span>}
-              </button>
+
+                {/* The key, always visible while running the set, and tappable
+                    to change it without opening the song first. */}
+                <button className={"sb-key-btn" + (ovKey ? " changed" : "")}
+                  title={ovKey ? "Key changed to " + ovKey : "Set the key for this song"}
+                  onClick={(ev) => { ev.stopPropagation(); setKeyFor(keyFor === sg.chartId ? null : sg.chartId); }}>
+                  {shownKey || "—"}
+                </button>
+
+                {reordering ? (
+                  <span className="sb-row-edit">
+                    <button className="sb-move" disabled={i === 0} title="Move up"
+                      onClick={(ev) => { ev.stopPropagation(); moveSong(i, i - 1); }}>↑</button>
+                    <button className="sb-move" disabled={i === setSongs.length - 1} title="Move down"
+                      onClick={(ev) => { ev.stopPropagation(); moveSong(i, i + 1); }}>↓</button>
+                    <button className="sb-move rm" title="Remove from today's set"
+                      onClick={(ev) => { ev.stopPropagation(); removeSong(i); }}>✕</button>
+                  </span>
+                ) : (
+                  chart && <span className="sb-item-lang">{chart.lang.toUpperCase()}</span>
+                )}
+              </div>
             );
           })}
+
+          {/* Songs Planning Center listed that have no chart here. Shown only
+              on PC's own order — once she is editing, the running order is
+              hers and a song with nothing to open has no place in it. */}
+          {!override && items.filter((it) => !it.match.entry).map((it, i) => (
+            <div className="sb-item" key={"nc" + i} style={{ opacity: .6 }}>
+              <span className="sb-num">·</span>
+              <div style={{ flex: 1 }}>
+                <div className="sb-item-title">{it.match.title}</div>
+                <div className="sb-item-sub" style={{ color: "#c9a24a" }}>chart not in library</div>
+              </div>
+            </div>
+          ))}
+
+          {/* Key picker for one row. KEY_LIST is the same vocabulary the chart
+              view offers, and it writes the SAME songbook_key_<chartId> key,
+              so a key set here and one set in the chart are one fact. */}
+          {keyFor && (
+            <div className="sb-modal" role="dialog" aria-modal="true" onClick={() => setKeyFor(null)}>
+              <div className="sb-sheet" onClick={(ev) => ev.stopPropagation()}>
+                <div className="sb-sheet-top">
+                  <span className="sb-sheet-name">{(library.charts[keyFor] || {}).names ? library.charts[keyFor].names.primary : "Key"}</span>
+                  <span className="sb-sheet-sub">key for today</span>
+                  <button className="sb-sheet-close" onClick={() => setKeyFor(null)}>Close</button>
+                </div>
+                <div className="sb-chips" style={{ marginTop: 10 }}>
+                  {KEY_LIST.map((k) => (
+                    <button key={k} className={"sb-chip" + (readKeyOverride(keyFor) === k ? " on" : "")}
+                      onClick={() => setKeyForChart(keyFor, k)}>{k}</button>
+                  ))}
+                  {KEY_LIST.map((k) => (
+                    <button key={k + "m"} className={"sb-chip" + (readKeyOverride(keyFor) === k + "m" ? " on" : "")}
+                      onClick={() => setKeyForChart(keyFor, k + "m")}>{k}m</button>
+                  ))}
+                </div>
+                {readKeyOverride(keyFor) && (
+                  <div style={{ marginTop: 12 }}>
+                    <button className="sb-ov-btn" onClick={() => setKeyForChart(keyFor, null)}>
+                      Reset to the chart's own key{library.charts[keyFor] && library.charts[keyFor].key ? " (" + library.charts[keyFor].key.tonic + ")" : ""}
+                    </button>
+                  </div>
+                )}
+                <div className="sb-sheet-note" style={{ marginTop: 10 }}>
+                  Nashville numbers follow the key. The capo setting is separate and is not changed here.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Add a library song into the running order, at a chosen position. */}
+          {addOpen && (
+            <div className="sb-modal" role="dialog" aria-modal="true" onClick={() => setAddOpen(false)}>
+              <div className="sb-sheet" onClick={(ev) => ev.stopPropagation()}>
+                <div className="sb-sheet-top">
+                  <span className="sb-sheet-name">Add a song</span>
+                  <span className="sb-sheet-sub">into today's set</span>
+                  <button className="sb-sheet-close" onClick={() => setAddOpen(false)}>Close</button>
+                </div>
+                <div className="sb-pos-row">
+                  <span>Insert at</span>
+                  <select value={addAt} onChange={(ev) => setAddAt(Number(ev.target.value))}>
+                    {setSongs.map((_, i) => <option key={i} value={i}>position {i + 1}</option>)}
+                    <option value={-1}>the end</option>
+                  </select>
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <input type="search" autoFocus placeholder="Search the library…" value={addQuery}
+                    onChange={(ev) => setAddQuery(ev.target.value)} />
+                </div>
+                <div className="sb-add-list">
+                  {addResults.length === 0 && <div className="sb-empty">{addQuery.trim().length < 2 ? "Type to search all " + library.songs.length + " songs." : "No chart matches “" + addQuery + "”."}</div>}
+                  {addResults.map((r, i) => (
+                    <button className="sb-item" key={i} onClick={() => addSong(r.entry, r.chart.id, addAt)}>
+                      <div style={{ flex: 1 }}>
+                        <div className="sb-item-title">{r.chart.names.primary}</div>
+                        {r.chart.names.alts.length > 0 && <div className="sb-item-sub">{r.chart.names.alts.join(" / ")}</div>}
+                      </div>
+                      <span className="sb-item-lang">{r.chart.lang.toUpperCase()}{r.chart.key ? " · " + r.chart.key.tonic : ""}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
       <div className="sb-muted" style={{ marginTop: 16 }}>{library.songs.length} songs · {Object.keys(library.charts).length} charts on this device</div>
