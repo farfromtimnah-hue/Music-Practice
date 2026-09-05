@@ -199,6 +199,11 @@ const S = `
 .sb-cc-badge{font-family:'Oswald',sans-serif;color:#81c784;letter-spacing:1px;text-transform:uppercase;font-size:11px;}
 .sb-cc-editing{border-color:#5a5a2a;background:rgba(240,192,64,.05);}
 .sb-cc-added{font-size:12px;color:#81c784;margin-top:6px;line-height:1.4;}
+/* A shape straight off the published chart — the answer she already knows. */
+.sb-cc-chart{border-color:#3a5a7a;background:rgba(74,109,167,.07);}
+.sb-cc-chartname{font-family:'Oswald',sans-serif;font-size:15px;letter-spacing:1px;color:#8fb6e8;}
+.sb-cc-chartsrc{font-size:11px;color:#6a7a95;letter-spacing:.5px;margin:-2px 0 6px;}
+.sb-cc-chartnote{font-size:12px;color:#e0b050;margin-top:6px;line-height:1.45;}
 .sb-cc-name{margin-top:8px;font-size:13px;color:#8888aa;}
 .sb-cc-name-main{font-family:'Oswald',sans-serif;font-size:20px;color:#f0c040;letter-spacing:1px;}
 .sb-cc-name-sub{font-size:12px;color:#8888aa;}
@@ -1319,17 +1324,33 @@ function CutCapoPopup({ token, capoSetting, isTeacher, onClose }) {
         {result.status === "ok" && !edit && (
           <>
             {result.reduced && <div className="sb-cc-warn">Shown as the nearest chord the cut-capo engine models; added colour tones are not drawn.</div>}
+            {/* A shape the standard chart does not carry is derived by search,
+                and may well be one she has never played. Say so, rather than
+                letting an unfamiliar diagram look authoritative. */}
+            {result.fromChart === false && (
+              <div className="sb-cc-warn">Not on the standard chart — best available shape, worked out from the notes.</div>
+            )}
             {result.voicings.map((v, i) => (
-              <div className="sb-cc-card" key={i}>
+              <div className={"sb-cc-card" + (v.chartName ? " sb-cc-chart" : "")} key={i}>
                 <div className="sb-cc-card-top">
-                  <span>{mine.length ? (i === 0 ? "Suggested" : "Alternative") : (i === 0 ? "Best shape" : "Alternative")}</span>
+                  <span>
+                    {v.chartName
+                      ? <><span className="sb-cc-chartname">{v.chartName}</span>{i > 0 ? " · alternate" : ""}</>
+                      : (mine.length ? (i === 0 ? "Suggested" : "Alternative") : (i === 0 ? "Best shape" : "Alternative"))}
+                  </span>
                   <span>{v.openCount} ringing · {v.frettedCount === 0 ? "no fingers" : v.frettedCount + " fingered"}{v.span > 0 ? " · " + (v.span + 1) + "-fret span" : ""}</span>
                 </div>
+                {v.chartName && <div className="sb-cc-chartsrc">standard cut capo chart (G7th)</div>}
                 <CutCapoDiagram shape={v.shape} capo={capo} cut />
                 <div className="sb-cc-card-top" style={{ marginTop: 6 }}>
                   <span>Notes low→high{capo > 0 ? " (sounding)" : ""}</span>
                   <span className="sb-cc-notes">{v.notes.join(" · ")}</span>
                 </div>
+                {/* The chart's own playing advice — real, and easy to lose. */}
+                {v.chartNote && <div className="sb-cc-chartnote">{v.chartNote}</div>}
+                {v.alsoReplaces && v.alsoReplaces.length > 0 && (
+                  <div className="sb-cc-added">Also the chart's shape for {v.alsoReplaces.join(" and ")}.</div>
+                )}
                 {v.added && v.added.length > 0 && (
                   <div className="sb-cc-added">Open strings add {v.added.join(" & ")} — the ring a cut capo is for.</div>
                 )}

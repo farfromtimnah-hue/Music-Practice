@@ -24,6 +24,7 @@ import {
 import { generateVoicings, analyzeVoicing } from "../cutcapo/voicing.js";
 import { CHROMA, CAPO_FRET } from "../cutcapo/tuning.js";
 import { getShapes, saveShape } from "../cutcapo/shapeStore.js";
+import { chartShapeFor, chartLabel, chartReplaces } from "./cutcapoChart.js";
 
 // Chart suffix -> the engine's own suffix vocabulary. Order matters: longest
 // and most specific first, and every minor form is pinned explicitly so it can
@@ -506,15 +507,64 @@ export const cutCapoAnswerFor = (token, setting, limit = 2) => {
     cutFret,
     transposed: capo > 0,
   };
+
+  // THE STANDARD CHART FIRST. `shape` is already the chord as FINGERED —
+  // shapeTokenFor transposed the sounding chord down by the full capo — which
+  // is the frame the chart is drawn in, so the lookup needs no further
+  // transposition and the shape itself is never moved.
+  const hit = chartShapeFor(shape.label);
+  if (hit) {
+    const pick = [hit.entry, ...hit.alternates].slice(0, Math.max(1, limit));
+    return {
+      ...base,
+      status: "ok",
+      reduced: shape.reduced,
+      fromChart: true,
+      voicings: pick.map((e) => describeChartEntry(e, capo, shape.label)),
+    };
+  }
+
+  // Not on the chart: fall back to the generated search, and SAY SO, so an
+  // unfamiliar diagram is explained rather than mysterious.
   const ranked = rankedVoicings(shape.root, shape.typeId, shape.bass);
   if (!ranked.length) return { ...base, status: "unplayable", missing: missingFor(shape) };
   return {
     ...base,
     status: "ok",
     reduced: shape.reduced,
+    fromChart: false,
     // The engine works in SHAPE space (as if the full capo were the nut), so
     // its pitch classes are the shape's, not what the guitar actually sounds.
     // `describe` transposes them up by the capo fret to report real pitches.
     voicings: ranked.slice(0, limit).map((k) => describe(k, capo)),
   };
 };
+
+/**
+ * One chart entry in the same shape the popup already consumes, so a charted
+ * answer and a generated one render through identical code.
+ *
+ * The chart's own note names are recomputed rather than trusted: they are
+ * recorded in cutcapoChart.js as documentation, and the ANALYSIS is the
+ * authority — that is what caught every misreading while the chart was being
+ * transcribed. Under a full capo the pitches move up by the capo fret, the
+ * same as any other shape.
+ */
+function describeChartEntry(e, capo, askedFor) {
+  const a = analyzeVoicing(e.shape);
+  const covers = chartReplaces(e).filter((t) => t !== askedFor);
+  return {
+    shape: e.shape,
+    openCount: a.openCount,
+    span: a.span,
+    frettedCount: a.frettedCount,
+    notes: a.sounding.map((x) => CHROMA[(x.pc + capo) % 12]),
+    bassNote: a.bass ? CHROMA[(a.bass.pc + capo) % 12] : null,
+    added: [],
+    missing: [],
+    // Chart-specific presentation.
+    chartName: chartLabel(e),
+    chartNote: e.note || null,
+    alsoReplaces: covers,
+  };
+}
