@@ -45,6 +45,8 @@ export const fetchSet = async (id, date) => {
   if (!res.ok) throw new Error("HTTP " + res.status);
   const body = await res.json();
   if (body.error) throw new Error(body.error);
+  // songs carry { title, sequence, key, key_minor } — `key` is Planning
+  // Center's PLAYING key for that item, which the chart PDF never follows.
   const data = { found: !!body.found, songs: body.songs || [], syncedAt: new Date().toISOString() };
   writeCachedSet(id, date, data);
   return data;

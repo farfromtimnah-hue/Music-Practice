@@ -1177,3 +1177,104 @@ The iPad viewport check is a measurement against the viewport this harness repor
 "Readable from music-stand distance" is asserted from type size and contrast, not from anyone standing at a music stand. That last step is hers.
 
 Nothing outside `src/songbook/Songbook.jsx` was modified: `setStore.js`, `src/tuner/`, `src/cutcapo/` and `src/openvoicings/` are untouched.
+
+---
+
+## The playing key comes from Planning Center, not the chart file
+
+Two of Sunday's six songs were wrong on stage. The songbook showed **Nada é
+Impossível** in C and **Nos Levantou** in F, because it read the key out of the
+chart PDF — and a chart PDF is a snapshot taken the day it was imported. When
+Planning Center transposes a song the chart never follows, so the app was
+confidently printing a key the band had stopped playing in.
+
+The authority is Planning Center, and the key was reachable the whole time. An
+earlier 403 on `/services/v2/songs` had been read as "keys are not available"
+and the question was dropped. That conclusion was wrong in a specific way worth
+recording: the key of a performance is not a property of the SONG, it is a
+property of the PLAN ITEM — the same song is in G this month and A next. It
+rides on the endpoint the worker already calls, one include away:
+
+    /plans/{plan}/items?per_page=200&include=key,arrangement,song
+
+Each song item carries `relationships.key.data.id`; the `included` array carries
+the matching Key objects with `starting_key` and `starting_minor`.
+
+### Worker
+
+`pcoFetchOrderOfService` now requests that include and resolves each item's key
+id against the included objects, returning `key` and `key_minor` on every item.
+`/songbook/set` passes both through. **null, never a guess**, when a song has no
+key attached — a wrong letter on stage is worse than no letter.
+
+The helper is shared with the order-of-service PDF, so the change is purely
+additive: two new fields on each item, and the PDF renderer reads only
+`item_type`, `title`, `description` and `length`. That is not an assumption —
+the field list was extracted mechanically from the renderer's body.
+
+### App
+
+Precedence is **her override → Planning Center → the chart**, which is the
+existing `playKey` concept extended by one source rather than reworked. The
+written key is untouched, so the Nashville numbers never move: a song's numbers
+are its structure, and structure does not change with the key. Only the letters
+resolve differently. A key called out in rehearsal still wins over Planning
+Center — the most recent decision in the room is the one on screen.
+
+**The relative-minor correction runs against the plan key exactly as it runs
+against the detected key.** Planning Center reports *Quem é Como Nosso Deus* as
+Em; the song is in G major. PC labels any song that starts on the 6 that way.
+Em and G share every note, so this is a LABEL disagreement, not a transposition,
+and treating it as a real key change would drag the band down a minor third.
+`resolvePlanKey` returns null in exactly that case, meaning "PC is not asking
+for a different key" — and the existing visible, dismissible, overridable notice
+still appears. One function serves both the set list row and the chart view, so
+the two can never disagree about what key a song is in.
+
+Provenance is visible rather than silent: the header reads `Key: G ·PC` beside
+the existing `·set` and `·chart` marks, and a dismissible line says which key
+came from Planning Center and what the chart is written in. A difference there
+is **expected**, not an error. The dismissal is keyed to the chart AND the key,
+so the next transposition announces itself instead of hiding behind a stale
+dismissal. Songs opened from search have no plan context and are unaffected.
+
+### Verified by actually running it
+
+- `npx vite build` passes. The worker deployed with a **new Version ID**
+  (`c14964b6-b40c-47a3-bdd8-adf8c8e72190`).
+- `curl /songbook/set` for Sunday 10AM 2026-09-06 returns the keys live:
+  Nada é Impossível **G**, Quem é Como Nosso Deus **Em**, Ele é Deus **A**,
+  Teu Toque **A**, Nos Levantou **E**. (`starting_key` already carries the "m"
+  suffix, so `key_minor` corroborates rather than being needed to build it.)
+- **In the real app in Chrome**: the set list shows G, G, A, A, E. Nada é
+  Impossível went C → **G**, Nos Levantou F → **E**.
+- **The numbers did not move.** Nada é Impossível still reads 1, 5, 6-7, 4, and
+  the legend confirms the letters shifted underneath them: `1=G 2-=Am 3-=Bm
+  4=C`, where the chart is written in C. Header reads `Key: G ·PC`.
+- **Quem é Como Nosso Deus still resolves to G major** despite PC saying Em,
+  with the "Auto-corrected from Em to G major" notice and `1=G` — and no `·PC`
+  mark, since PC is agreeing with the chart rather than transposing it.
+- **A manual override still wins.** Setting D by hand on Nada é Impossível gave
+  `Key: D ·set` with `1=D 2-=Em 3-=F#m 4=G`, the PC notice correctly suppressed,
+  and the row marked as changed. Cleared afterwards.
+- **A song with no key degrades to the chart's key**, run against the shipped
+  `resolvePlanKey`: null, undefined, empty and unparseable all return null, and
+  the caller falls back to the chart.
+
+### Caveats
+
+The order-of-service GET and PDF endpoints were **not** exercised end to end:
+both require an auth token this session did not have, and both returned 401
+before reaching the helper. What was verified instead is that the shared helper
+runs correctly against live Planning Center (the `/songbook/set` 200 above is
+that same code path), and that the PDF renderer touches none of the changed
+fields. The remaining risk is a rendering regression that a 401 cannot reveal,
+so the PDF is worth opening once from the dashboard.
+
+Every song on both live plans had a key attached, so the null path could not be
+exercised against real data — it was tested against the shipped function, not
+observed on screen with a genuinely keyless song.
+
+`setStore.js` gained a comment and nothing else; its caching and refresh logic
+is untouched. `src/tuner/`, `src/cutcapo/` and `src/openvoicings/` were not
+modified, and no worker route other than `/songbook/set` changed.

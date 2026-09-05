@@ -543,10 +543,29 @@ function AddSectionPicker({ index, hostChartId, hostKey, positions, onInsert, on
   );
 }
 
+// Planning Center's plan key, corrected and resolved against a chart — or null
+// when PC has nothing to add.
+//
+// PC labels any song that starts on the 6 as the relative minor: it reports
+// "Quem é Como Nosso Deus" as Em when the song is in G major. Em and G share
+// every note, so that is a LABEL disagreement, not a transposition — the honest
+// answer is the chart's own key, unshifted. Returning null here says exactly
+// that: "PC is not asking for a different key." Anything else is a real
+// transposition PC made that the chart PDF never followed.
+//
+// One function, used by both the set list row and the chart view, so the two
+// can never disagree about what key a song is in.
+export const resolvePlanKey = (planKey, written) => {
+  const p = planKey && parseKeyName(planKey);
+  if (!p || !written) return null;
+  if (p.mode === "minor" && p.tonicPc === (written.tonicPc + 9) % 12) return null;
+  return p;
+};
+
 // ============================================================
 // CHART VIEW
 // ============================================================
-function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, index, serviceTypeId, onBack, onSwitchChart, prefs, setPrefs, onKeepAlive, isTeacher, instrument }) {
+function ChartView({ entry, chartId, fromSet, setNav, planKey, onNavigate, onLoadWhole, index, serviceTypeId, onBack, onSwitchChart, prefs, setPrefs, onKeepAlive, isTeacher, instrument }) {
   const chart = library.charts[chartId];
   const detected = chart.key;
   // TWO SEPARATE FACTS, deliberately kept apart.
@@ -564,6 +583,11 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, i
   const [chartKeyOverride, setChartKeyOverride] = useState(() => { migrateRelativeMinorKey(chartId, detected); return lsGet("songbook_chartkey_" + chartId, null); });
   const [keyOverride, setKeyOverride] = useState(() => lsGet("songbook_key_" + chartId, null));
   const [noticeDismissed, setNoticeDismissed] = useState(() => lsGet("songbook_notice_" + chartId, false));
+  // Dismissal is keyed to the KEY as well as the chart: if PC transposes this
+  // song again, the new key announces itself rather than staying hidden behind
+  // a dismissal of the old one.
+  const planNoticeKey = "songbook_pcnotice_" + chartId + "_" + (planKey || "");
+  const [planNoticeDismissed, setPlanNoticeDismissed] = useState(() => lsGet(planNoticeKey, false));
   const [customOrder, setCustomOrder] = useState(() => lsGet("songbook_order_" + chartId, null));
   const [editing, setEditing] = useState(false);
   const [pickKey, setPickKey] = useState(false);
@@ -582,7 +606,7 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, i
   const [tunerOpen, setTunerOpen] = useState(false);
   const dragRef = useRef(null);
 
-  useEffect(() => { migrateRelativeMinorKey(chartId, detected); setChartKeyOverride(lsGet("songbook_chartkey_" + chartId, null)); setKeyOverride(lsGet("songbook_key_" + chartId, null)); setNoticeDismissed(lsGet("songbook_notice_" + chartId, false)); setCustomOrder(lsGet("songbook_order_" + chartId, null)); setCapoState(normalizeCapoSetting(lsGet("songbook_capo_" + chartId, null))); setInserts(readInserts(chartId)); setEditing(false); setPickKey(false); setFixChartKey(false); setTapped(null); setAddSecOpen(false); setTunerOpen(false); }, [chartId]);
+  useEffect(() => { migrateRelativeMinorKey(chartId, detected); setChartKeyOverride(lsGet("songbook_chartkey_" + chartId, null)); setKeyOverride(lsGet("songbook_key_" + chartId, null)); setNoticeDismissed(lsGet("songbook_notice_" + chartId, false)); setPlanNoticeDismissed(lsGet("songbook_pcnotice_" + chartId + "_" + (planKey || ""), false)); setCustomOrder(lsGet("songbook_order_" + chartId, null)); setCapoState(normalizeCapoSetting(lsGet("songbook_capo_" + chartId, null))); setInserts(readInserts(chartId)); setEditing(false); setPickKey(false); setFixChartKey(false); setTapped(null); setAddSecOpen(false); setTunerOpen(false); }, [chartId, planKey]);
   // Keep the app's inactivity timer from blanking a chart that is open on stage.
   useEffect(() => { if (!onKeepAlive) return; const t = setInterval(onKeepAlive, 60 * 1000); return () => clearInterval(t); }, [onKeepAlive]);
 
@@ -598,11 +622,31 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, i
   // property of the song, not of the key it is called in: "put it in D" moves
   // where 1 sits, it does not turn a major song minor. Taking the mode too
   // would let the header say "Am" over letters that are plainly A major.
+  //
+  // THREE SOURCES, in strict precedence: her override, then Planning Center's
+  // plan key, then the chart's own key. Her override always wins — a key
+  // called out in rehearsal is the most recent decision in the room, and PC
+  // must never reach in and overwrite it.
+  //
+  // THE RELATIVE-MINOR CORRECTION APPLIES TO THE PLAN KEY TOO. Planning Center
+  // labels any song that starts on the 6 as the relative minor — it reports
+  // "Quem é Como Nosso Deus" as Em when the song is in G major. That is the
+  // same mislabel `minorSurface` already catches in the chart's own declared
+  // key, and it is not a transposition: Em and G share every note. So when PC
+  // names the relative minor of the key the chart is in, PC and the chart
+  // AGREE, and the honest answer is the chart's key with nothing shifted.
+  // Treating it as a real key change would drag the letters down a minor third
+  // and put the band in the wrong key on stage.
+  const planParsed = useMemo(() => resolvePlanKey(planKey, writtenKey), [planKey, writtenKey]);
+
+  // Where the playing key came from, for the badge on the header.
+  const keySource = keyOverride ? "override" : planParsed ? "plan" : "chart";
+
   const playKey = useMemo(() => {
-    const p = keyOverride && parseKeyName(keyOverride);
+    const p = (keyOverride && parseKeyName(keyOverride)) || planParsed;
     if (!p || !writtenKey) return writtenKey;
     return { tonic: p.tonic, tonicPc: p.tonicPc, mode: writtenKey.mode };
-  }, [keyOverride, writtenKey]);
+  }, [keyOverride, planParsed, writtenKey]);
   // Semitones from the page to the room. Zero unless a playing key is forced.
   const playShift = useMemo(
     () => (writtenKey && playKey ? (((playKey.tonicPc - writtenKey.tonicPc) % 12) + 12) % 12 : 0),
@@ -728,7 +772,11 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, i
     // ·chart = the chart's own key was corrected (numbers move). When both are
     // on, ·chart names the written key, because the header's own key is the
     // playing one and the two are then different facts on one line.
-    const mark = (keyOverride ? " ·set" : "") + (chartKeyOverride ? (keyOverride ? " ·chart " + keyName(writtenKey) : " ·chart") : "");
+    // ·PC = this key came from Planning Center, not the chart file. Shown so a
+    // key that differs from the printed chart is visible rather than silent —
+    // that difference is normal (PC transposed; the PDF never followed), not an
+    // error. Her own override still marks ·set and outranks it.
+    const mark = (keyOverride ? " ·set" : keySource === "plan" ? " ·PC" : "") + (chartKeyOverride ? (keyOverride ? " ·chart " + keyName(writtenKey) : " ·chart") : "");
     const base = "Key: " + keyName(key) + mark;
     if (!isTeacher) return capoLabel(key) + mark;
     const full = capo.capo > 0 ? "Capo " + capo.capo + " (" + transposedKeyName(key, -capo.capo) + ")" : null;
@@ -740,6 +788,12 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, i
   };
 
   const showNotice = detected && detected.minorSurface && !noticeDismissed && !chartKeyOverride;
+  // Say so when the key on screen came from Planning Center and the printed
+  // chart says something else. A difference here is EXPECTED — PC transposed
+  // the song and the chart PDF never followed — so this states the fact rather
+  // than warning about it. Suppressed once her own override is in force,
+  // because then the plan key is not what she is looking at.
+  const showPlanNotice = keySource === "plan" && !planNoticeDismissed && writtenKey && playKey && playKey.tonicPc !== writtenKey.tonicPc;
 
   // The letter to print beside a number: the chord as it is actually FINGERED.
   // Two independent moves, in this order — transpose the page into the key the
@@ -942,7 +996,7 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, i
     // setPages to an equal value is skipped above, and React drops a set to
     // the identical null — so this converges instead of spinning.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chartId, page, pages, blockOrder, insertBlocks, prefs.gloss, prefs.legend, prefs.roadmapFull, editing, capo.capo, capo.cut, keyOverride, chartKeyOverride, showNotice, cutOn]);
+  }, [chartId, page, pages, blockOrder, insertBlocks, prefs.gloss, prefs.legend, prefs.roadmapFull, editing, capo.capo, capo.cut, keyOverride, chartKeyOverride, showNotice, showPlanNotice, cutOn]);
 
   // Pointer events, not touch events: the same code path serves the
   // iPad on stage and a mouse on the laptop while testing.
@@ -1122,6 +1176,12 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, i
           <span className="sb-bar-sp" />
         </div>
 
+        {showPlanNotice && (
+          <div className="sb-notice">
+            <span>Key <b>{keyName(playKey)}</b> from Planning Center — the chart is written in <b>{keyName(writtenKey)}</b>. The numbers are unchanged; only the letters move.</span>
+            <button className="sb-tool" onClick={() => { setPlanNoticeDismissed(true); lsSet(planNoticeKey, true); }}>OK</button>
+          </div>
+        )}
         {showNotice && (
           <div className="sb-notice">
             <span>Auto-corrected from <b>{detected.relativeMinor}</b> to <b>{detected.tonic} major</b>. This chart leans on the 6- chord (the pattern Planning Center labels as minor) but its cadences land on {detected.tonic}.</span>
@@ -1621,10 +1681,21 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
   // Planning Center's own running order: the songs of the set that actually
   // have a chart, in the sequence the endpoint returned. Songs with no chart
   // in the library are skipped, since there is nothing to open for them.
+  // `planKey` rides along: Planning Center's PLAYING key for that item. The
+  // chart PDF is a stale snapshot that never follows a transposition, so PC is
+  // the authority on what key the band is actually in.
   const pcSongs = useMemo(() => items
-    .map((it) => { const e = it.match.entry; const c = e && pickChart(e, library, serviceId); return c ? { entry: e, chartId: c.id, title: it.match.title } : null; })
+    .map((it) => { const e = it.match.entry; const c = e && pickChart(e, library, serviceId); return c ? { entry: e, chartId: c.id, title: it.match.title, planKey: it.key || null } : null; })
     .filter(Boolean),
     [items, serviceId]);
+
+  // Plan key by chartId, so a reordered/overridden running order keeps PC's
+  // key: an override moves songs around, it does not change what key PC holds.
+  const planKeyByChart = useMemo(() => {
+    const m = {};
+    pcSongs.forEach((sg) => { if (sg.planKey) m[sg.chartId] = sg.planKey; });
+    return m;
+  }, [pcSongs]);
 
   // ---------------------------------------------------------------------
   // OVERRIDE — the room's running order, when rehearsal changed it.
@@ -1666,8 +1737,8 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
     if (!chart) return null;
     const entry = library.songs.find((sg) => sg.charts.includes(it.chartId));
     if (!entry) return null;
-    return { entry, chartId: it.chartId, title: it.title || chart.names.primary, added: !!it.added };
-  }, []);
+    return { entry, chartId: it.chartId, title: it.title || chart.names.primary, added: !!it.added, planKey: planKeyByChart[it.chartId] || null };
+  }, [planKeyByChart]);
 
   // THE running order. Everything downstream — the list, the swipe navigation,
   // prev/next — reads this one value, so an override cannot be applied to the
@@ -1777,7 +1848,11 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
     const setNav = navIndex >= 0 ? { list: setSongs, index: navIndex } : null;
     return (
       <><style>{S}</style><div className="sb sb-fixed">
-        <ChartView entry={open.entry} chartId={open.chartId} fromSet={open.fromSet} setNav={setNav} index={index} serviceTypeId={serviceId} prefs={prefs} setPrefs={setPrefs} onKeepAlive={onKeepAlive} isTeacher={isTeacher} instrument={instrument}
+        {/* planKey is looked up by chartId, not by the row that was tapped, so
+            swiping through the set and switching charts inside a song both keep
+            Planning Center's key. A song opened from SEARCH has no plan context
+            and gets null — it keeps using the chart's own key, as before. */}
+        <ChartView entry={open.entry} chartId={open.chartId} fromSet={open.fromSet} setNav={setNav} planKey={open.fromSet ? (planKeyByChart[open.chartId] || null) : null} index={index} serviceTypeId={serviceId} prefs={prefs} setPrefs={setPrefs} onKeepAlive={onKeepAlive} isTeacher={isTeacher} instrument={instrument}
           onNavigate={(t) => setOpen({ entry: t.entry, chartId: t.chartId, fromSet: true })}
           onLoadWhole={loadWholeSong}
           onBack={() => setOpen(null)} onSwitchChart={(id) => setOpen({ ...open, chartId: id })} />
@@ -1878,7 +1953,13 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
             // With no playing-key override the row shows the chart's own key —
             // corrected, if detection had read the chart itself wrong.
             const ownKey = readChartKeyOverride(sg.chartId) || (chart && chart.key ? chart.key.tonic + (chart.key.mode === "minor" ? "m" : "") : null);
-            const shownKey = ovKey || ownKey;
+            // Same precedence as the chart view — her override, then Planning
+            // Center, then the chart — and the same relative-minor correction:
+            // PC naming the 6- of the chart's key is agreeing with the chart,
+            // not transposing it, so the row keeps showing the chart's key.
+            const rowWritten = parseKeyName(readChartKeyOverride(sg.chartId)) || (chart ? chart.key : null);
+            const rowPlan = resolvePlanKey(sg.planKey, rowWritten);
+            const shownKey = ovKey || (rowPlan ? keyName({ ...rowPlan, mode: rowWritten ? rowWritten.mode : rowPlan.mode }) : null) || ownKey;
             const alts = [sg.entry.pt, sg.entry.en].filter((n) => n && n !== sg.title).join(" · ");
             return (
               <div key={sg.chartId + ":" + i}
