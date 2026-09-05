@@ -84,6 +84,20 @@ export const TUNER_CSS = `
 .tn-string-btn.on{border-color:var(--gold);color:var(--gold);background:var(--surface2);}
 .tn-string-btn.locked{box-shadow:0 0 0 2px rgba(240,192,64,.35);}
 .tn-hint{text-align:center;font-size:11px;color:var(--muted);}
+/* ---- capo: verifying in playing position ---- */
+.tn-capo{border:1px solid var(--border);border-radius:12px;padding:9px 10px;display:flex;flex-direction:column;gap:8px;}
+.tn-capo-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.tn-capo-lbl{font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);min-width:74px;}
+.tn-capo-frets{display:flex;gap:5px;flex-wrap:wrap;}
+/* 44px minimum: this gets tapped in a hurry, often one-handed. */
+.tn-capo-btn{min-width:44px;min-height:44px;padding:0 10px;border-radius:10px;border:1.5px solid var(--border);
+  background:var(--surface);color:var(--text);font-family:'Oswald',sans-serif;font-size:15px;cursor:pointer;}
+.tn-capo-btn.on{border-color:var(--gold);color:var(--gold);background:var(--surface2);}
+.tn-capo-btn.wide{min-width:150px;font-size:13px;letter-spacing:.5px;}
+.tn-capo-note{font-size:11px;color:var(--muted);line-height:1.5;}
+.tn-capo-note strong{color:var(--gold);font-weight:600;}
+.tn-capo-from{color:var(--gold);}
+.tn-string-open{display:block;font-size:9px;letter-spacing:.5px;color:var(--muted);margin-top:1px;}
 
 /* teacher block */
 .tn-teacher{margin-top:6px;padding:14px;border-radius:var(--radius);background:var(--surface);

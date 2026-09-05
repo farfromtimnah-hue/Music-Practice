@@ -140,11 +140,21 @@ function hasEnergyAt(buf, freq, sampleRate) {
  *
  * @param {Float32Array} buf       time-domain samples, ideally BUFFER_SIZE long
  * @param {number}       sampleRate
+ * @param {number}       [maxFreq]  search ceiling, defaulting to MAX_FREQ.
+ *        A capo raises the targets — high E is 392 Hz at full capo 3 — so the
+ *        caller may need a higher ceiling than the open-tuning 360. Passing it
+ *        in keeps that a property of the CALLER's targets rather than a second
+ *        hardcoded constant that can fall out of step with them. Nothing else
+ *        about detection changes: the filter corner, the clarity threshold and
+ *        the residual-energy check are all untouched, because they were tuned
+ *        against real hardware and a previous attempt at moving them broke
+ *        high-E detection and dragged it flat.
  * @returns {{frequency:number, clarity:number}|null} null when the frame is
  *          silent, out of range, or below the clarity threshold.
  */
-export function detectPitch(raw, sampleRate) {
+export function detectPitch(raw, sampleRate, maxFreq = MAX_FREQ) {
   const N = raw.length;
+  const ceiling = Math.max(MAX_FREQ, Number(maxFreq) || MAX_FREQ);
 
   // --- gate 1: silence -------------------------------------------------
   // Measured on the RAW signal, before filtering, so that the low-pass
@@ -175,7 +185,7 @@ export function detectPitch(raw, sampleRate) {
   if (fRms < RMS_SILENCE) return null;
 
   // Lag search bounds derived from the frequency range.
-  const tauMin = Math.max(2, Math.floor(sampleRate / MAX_FREQ));
+  const tauMin = Math.max(2, Math.floor(sampleRate / ceiling));
   const tauMax = Math.min(Math.floor(N / 2), Math.ceil(sampleRate / MIN_FREQ));
   if (tauMax <= tauMin) return null;
 
@@ -249,7 +259,7 @@ export function detectPitch(raw, sampleRate) {
   const clarity = 1 - Math.min(1, Math.max(0, cmnd[tauEstimate]));
 
   // --- gates 2 & 3: range and confidence -------------------------------
-  if (frequency < MIN_FREQ || frequency > MAX_FREQ) return null;
+  if (frequency < MIN_FREQ || frequency > ceiling) return null;
   if (clarity < CLARITY_THRESHOLD) return null;
 
   // --- gate 4: the reported fundamental must actually be present -------

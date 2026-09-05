@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Headstock from "./Headstock.jsx";
 import { TUNER_CSS } from "./tunerStyles.js";
 import { TunerAudio, CONSTRAINTS_PAUSE, CONSTRAINTS_CONTINUOUS } from "./audio.js";
@@ -10,6 +10,10 @@ import {
   nearestString,
   IN_TUNE_CENTS,
 } from "./pitch.js";
+import {
+  capoStrings, ceilingFor, capoLabel, normalizeCapo, cutFretOf, isCapoOff,
+  MAX_FULL_CAPO, DEFAULT_CAPO,
+} from "./capo.js";
 
 /* Mode A cycle timings, in ms. */
 const TONE_MS = 1500;      // how long the reference tone sounds
@@ -24,7 +28,26 @@ const HOLD_MS = 900;
 export default function Tuner({ instrument = "guitar", isTeacher = false, onBack }) {
   const [tuningId, setTuningId] = useState(() => defaultTuningFor(instrument));
   const tuning = TUNINGS[tuningId] || TUNINGS.guitar;
-  const strings = tuning.strings;
+
+  /* THE TUNER'S OWN capo setting, defaulting to off. Deliberately NOT read
+     from or written to the songbook's per-chart capo: this is a property of
+     how the guitar is set up right now, not of a song. */
+  const [capo, setCapo] = useState(DEFAULT_CAPO);
+  // A cut capo is a 6-string guitar thing; a bass has no such capo.
+  const cuttable = tuning.strings.length === 6;
+  const capoOff = isCapoOff(capo);
+
+  // Targets with the capo applied — a NEW array every time, so TUNINGS
+  // itself is never mutated and the open path cannot regress. Every string
+  // carries its OWN semitone count; there is no shared offset anywhere.
+  const strings = useMemo(
+    () => capoStrings(tuning, capo, cuttable),
+    [tuning, capo.capo, capo.cut, cuttable]
+  );
+  // The search ceiling follows the highest target in play. With a full capo
+  // the high E climbs past MAX_FREQ (392 Hz at capo 3) and would otherwise be
+  // undetectable no matter how it displays.
+  const ceiling = useMemo(() => ceilingFor(strings), [strings]);
 
   // "pause" = Mode A, "continuous" = Mode B (teacher only)
   const [micMode, setMicMode] = useState("pause");
@@ -57,10 +80,14 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
   const lockedRef = useRef(-1);
   const stringsRef = useRef(strings);
   const listeningRef = useRef(true);
+  // Read by the analysis loop, which is deliberately not re-created on every
+  // state change — so the capo ceiling reaches it through a ref like the rest.
+  const ceilingRef = useRef(ceiling);
 
   useEffect(() => { lockedRef.current = lockedIndex; }, [lockedIndex]);
   useEffect(() => { stringsRef.current = strings; }, [strings]);
   useEffect(() => { listeningRef.current = listening; }, [listening]);
+  useEffect(() => { ceilingRef.current = ceiling; }, [ceiling]);
 
   /* ---------------- the analysis loop (shared by both modes) --------- */
   const loop = useCallback(() => {
@@ -69,7 +96,7 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
 
     const buf = audio.read();
     if (buf) {
-      const res = detectPitch(buf, audio.sampleRate);
+      const res = detectPitch(buf, audio.sampleRate, ceilingRef.current);
       const now = performance.now();
 
       if (res) {
@@ -323,6 +350,47 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
         </div>
       )}
 
+      {/* ---- capo: verify in playing position ----
+           Tuning OPEN is the accurate baseline — that is what the strings are
+           actually set to. A capo pulls them slightly sharp by pressing them
+           to the fret, so this exists to CHECK the guitar in the position it
+           will be played in, not to replace tuning open. Said plainly below,
+           because a target that silently means something else is worse than
+           no capo support at all. */}
+      <div className="tn-capo">
+        <div className="tn-capo-row">
+          <span className="tn-capo-lbl">Capo</span>
+          <div className="tn-capo-frets">
+            {Array.from({ length: MAX_FULL_CAPO + 1 }, (_, n) => (
+              <button
+                key={n}
+                className={`tn-capo-btn ${capo.capo === n ? "on" : ""}`}
+                onClick={() => { setCapo((c) => ({ ...normalizeCapo(c), capo: n })); setLockedIndex(-1); }}
+              >
+                {n === 0 ? "off" : n}
+              </button>
+            ))}
+          </div>
+        </div>
+        {cuttable && (
+          <div className="tn-capo-row">
+            <span className="tn-capo-lbl">Cut capo</span>
+            <button
+              className={`tn-capo-btn wide ${capo.cut ? "on" : ""}`}
+              onClick={() => { setCapo((c) => ({ ...normalizeCapo(c), cut: !c.cut })); setLockedIndex(-1); }}
+            >
+              {capo.cut ? "on · fret " + cutFretOf(capo) + " (A D G)" : "off"}
+            </button>
+          </div>
+        )}
+        <div className="tn-capo-note">
+          {capoOff
+            ? "Tune open — that is the accurate baseline. Set a capo to verify in playing position."
+            : <>Targets are <strong>capo positions</strong> ({capoLabel(capo, cuttable)}), not open pitches.
+               Tune open first for accuracy, then check here in playing position.</>}
+        </div>
+      </div>
+
       {/* listening indicator — dims while the reference tone plays */}
       <div className={`tn-listening ${listening ? "on" : "off"}`}>
         <span className="tn-dot" />
@@ -349,9 +417,20 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
           ) : activeString ? (
             <>
               <div className="tn-note">{activeString.label}</div>
-              <div className="tn-target">
-                target {activeString.freq.toFixed(2)} Hz
-              </div>
+              {/* With a capo on, never show a bare note: say which open string
+                  it is and that this is a capo position, so there is no doubt
+                  which pitch the number refers to. */}
+              {activeString.capoed ? (
+                <div className="tn-target">
+                  <span className="tn-capo-from">{activeString.openLabel} → {activeString.label}</span>
+                  {" · "}{activeString.freq.toFixed(2)} Hz · {capoLabel(capo, cuttable)}
+                </div>
+              ) : (
+                <div className="tn-target">
+                  target {activeString.freq.toFixed(2)} Hz
+                  {!capoOff && <span className="tn-capo-from"> · open under {capoLabel(capo, cuttable)}</span>}
+                </div>
+              )}
               <div className="tn-freq">
                 {reading ? `${reading.frequency.toFixed(2)} Hz` : "—"}
               </div>
@@ -400,6 +479,7 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
             onClick={() => setLockedIndex(i === lockedIndex ? -1 : i)}
           >
             {s.label}
+            {s.capoed && <span className="tn-string-open">{s.openLabel}</span>}
           </button>
         ))}
       </div>
@@ -467,6 +547,10 @@ export default function Tuner({ instrument = "guitar", isTeacher = false, onBack
             <div className="tn-diag-row">
               <span>Mic</span>
               <strong>{listening ? "open" : "muted"}</strong>
+            </div>
+            <div className="tn-diag-row">
+              <span>Range</span>
+              <strong>{"28–" + ceiling + " Hz"}</strong>
             </div>
             <div className="tn-diag-row">
               <span>Audio</span>
