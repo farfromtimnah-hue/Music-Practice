@@ -3,9 +3,9 @@ import library from "./library.json";
 import { buildSearchIndex, search } from "./search.js";
 import { matchSetItem, pickChart } from "./match.js";
 import { SERVICE_TYPES, STUDENT_SERVICE_IDS, defaultDateFor, readCachedSet, fetchSet, sameSongs } from "./setStore.js";
-import { toNashville, keyLegend, capoLabel, keyName, parseKeyName, transposedKeyName, KEY_LIST } from "./chords.js";
+import { toNashville, keyLegend, capoLabel, keyName, parseKeyName, transposedKeyName, transposeChordToken, pcToName, KEY_LIST } from "./chords.js";
 import { abbreviationsFor } from "./sections.js";
-import { readOverride, writeOverride, clearOverride, readKeyOverride, writeKeyOverride, clearKeyOverrides, basisOf, basisDiffers } from "./overrideStore.js";
+import { readOverride, writeOverride, clearOverride, readKeyOverride, writeKeyOverride, clearKeyOverrides, migrateRelativeMinorKey, readChartKeyOverride, basisOf, basisDiffers } from "./overrideStore.js";
 import {
   cutCapoAnswerFor, normalizeCapoSetting, cutFretOf, MAX_FULL_CAPO,
   savedShapesFor, saveShapeFor, deleteSavedShape, analyseShape,
@@ -535,11 +535,25 @@ function AddSectionPicker({ index, hostChartId, hostKey, positions, onInsert, on
 function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, index, serviceTypeId, onBack, onSwitchChart, prefs, setPrefs, onKeepAlive, isTeacher, instrument }) {
   const chart = library.charts[chartId];
   const detected = chart.key;
+  // TWO SEPARATE FACTS, deliberately kept apart.
+  //
+  //   chartKeyOverride — "detection read the CHART wrong". Rare, and a property
+  //     of the chart data. It changes what the numbers are measured against,
+  //     which is exactly what the relative-minor correction below needs.
+  //
+  //   keyOverride — "we are PLAYING this in a different key today". Common:
+  //     the leader calls it in rehearsal. It must never touch the numbers. A
+  //     song's Nashville numbers describe its harmonic structure and that
+  //     structure does not change with the key; only the letters the numbers
+  //     resolve to move. This is the same localStorage key the set-list picker
+  //     writes, so a key set from either place stays one fact.
+  const [chartKeyOverride, setChartKeyOverride] = useState(() => { migrateRelativeMinorKey(chartId, detected); return lsGet("songbook_chartkey_" + chartId, null); });
   const [keyOverride, setKeyOverride] = useState(() => lsGet("songbook_key_" + chartId, null));
   const [noticeDismissed, setNoticeDismissed] = useState(() => lsGet("songbook_notice_" + chartId, false));
   const [customOrder, setCustomOrder] = useState(() => lsGet("songbook_order_" + chartId, null));
   const [editing, setEditing] = useState(false);
   const [pickKey, setPickKey] = useState(false);
+  const [fixChartKey, setFixChartKey] = useState(false);   // the chart-key control is disclosed, not always on
   // { capo, cut } — a full capo and a cut capo are independent and combine.
   // The cut capo is Nicole's own tool: teacher only, never offered to students.
   const [capo, setCapoState] = useState(() => normalizeCapoSetting(lsGet("songbook_capo_" + chartId, null)));
@@ -554,11 +568,35 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, i
   const [tunerOpen, setTunerOpen] = useState(false);
   const dragRef = useRef(null);
 
-  useEffect(() => { setKeyOverride(lsGet("songbook_key_" + chartId, null)); setNoticeDismissed(lsGet("songbook_notice_" + chartId, false)); setCustomOrder(lsGet("songbook_order_" + chartId, null)); setCapoState(normalizeCapoSetting(lsGet("songbook_capo_" + chartId, null))); setInserts(readInserts(chartId)); setEditing(false); setPickKey(false); setTapped(null); setAddSecOpen(false); setTunerOpen(false); }, [chartId]);
+  useEffect(() => { migrateRelativeMinorKey(chartId, detected); setChartKeyOverride(lsGet("songbook_chartkey_" + chartId, null)); setKeyOverride(lsGet("songbook_key_" + chartId, null)); setNoticeDismissed(lsGet("songbook_notice_" + chartId, false)); setCustomOrder(lsGet("songbook_order_" + chartId, null)); setCapoState(normalizeCapoSetting(lsGet("songbook_capo_" + chartId, null))); setInserts(readInserts(chartId)); setEditing(false); setPickKey(false); setFixChartKey(false); setTapped(null); setAddSecOpen(false); setTunerOpen(false); }, [chartId]);
   // Keep the app's inactivity timer from blanking a chart that is open on stage.
   useEffect(() => { if (!onKeepAlive) return; const t = setInterval(onKeepAlive, 60 * 1000); return () => clearInterval(t); }, [onKeepAlive]);
 
-  const key = useMemo(() => (keyOverride && parseKeyName(keyOverride)) || (detected ? { tonic: detected.tonic, tonicPc: detected.tonicPc, mode: detected.mode } : null), [keyOverride, detected]);
+  // The key the CHART IS WRITTEN IN. Everything numeric measures against this
+  // and only this, so the numbers are identical at every playing key.
+  const writtenKey = useMemo(
+    () => (chartKeyOverride && parseKeyName(chartKeyOverride)) || (detected ? { tonic: detected.tonic, tonicPc: detected.tonicPc, mode: detected.mode } : null),
+    [chartKeyOverride, detected]
+  );
+  // The key the BAND IS PLAYING IN. Drives the letters, the header and the
+  // capo maths. Defaults to the written key, which is the no-override case.
+  // Only the TONIC is taken from a playing-key override. Major-or-minor is a
+  // property of the song, not of the key it is called in: "put it in D" moves
+  // where 1 sits, it does not turn a major song minor. Taking the mode too
+  // would let the header say "Am" over letters that are plainly A major.
+  const playKey = useMemo(() => {
+    const p = keyOverride && parseKeyName(keyOverride);
+    if (!p || !writtenKey) return writtenKey;
+    return { tonic: p.tonic, tonicPc: p.tonicPc, mode: writtenKey.mode };
+  }, [keyOverride, writtenKey]);
+  // Semitones from the page to the room. Zero unless a playing key is forced.
+  const playShift = useMemo(
+    () => (writtenKey && playKey ? (((playKey.tonicPc - writtenKey.tonicPc) % 12) + 12) % 12 : 0),
+    [writtenKey, playKey]
+  );
+  // `key` is the playing key: it is what the header, the legend, the capo
+  // suggestion and the borrowed-section picker are all asking about.
+  const key = playKey;
   const charts = entry.charts.map((id) => library.charts[id]);
   const langs = [...new Set(charts.map((c) => c.lang))];
   const sameLang = charts.filter((c) => c.lang === chart.lang);
@@ -668,8 +706,17 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, i
   // single key describes it — it shows its derived fret instead.
   const keyHeader = () => {
     if (!key) return "Key: ?";
-    const base = "Key: " + keyName(key);
-    if (!isTeacher) return capoLabel(key);
+    // A forced setting is SAID so, because "Key: D" looked identical whether
+    // detected or set by hand and a leftover setting could sit there unnoticed
+    // for weeks. The two marks are different words because they are different
+    // facts: ·set moves the letters, ·chart moves the NUMBERS.
+    // ·set = the band is playing it somewhere else today (letters move).
+    // ·chart = the chart's own key was corrected (numbers move). When both are
+    // on, ·chart names the written key, because the header's own key is the
+    // playing one and the two are then different facts on one line.
+    const mark = (keyOverride ? " ·set" : "") + (chartKeyOverride ? (keyOverride ? " ·chart " + keyName(writtenKey) : " ·chart") : "");
+    const base = "Key: " + keyName(key) + mark;
+    if (!isTeacher) return capoLabel(key) + mark;
     const full = capo.capo > 0 ? "Capo " + capo.capo + " (" + transposedKeyName(key, -capo.capo) + ")" : null;
     const cut = capo.cut ? "cut capo (fret " + cutFret + ")" : null;
     if (full && cut) return base + " - " + full + " + " + cut;
@@ -678,12 +725,34 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, i
     return base;
   };
 
-  const showNotice = detected && detected.minorSurface && !noticeDismissed && !keyOverride;
-  // Nashville numbers are independent of the capo: a 1 is a 1 in every mode.
+  const showNotice = detected && detected.minorSurface && !noticeDismissed && !chartKeyOverride;
+
+  // The letter to print beside a number: the chord as it is actually FINGERED.
+  // Two independent moves, in this order — transpose the page into the key the
+  // band is playing, then take the capo off it, because with a capo on the
+  // chord under the hand is not the chord that sounds.
+  const useFlats = /b/.test(key ? key.tonic : "") || (key && key.tonic === "F");
+  const fingeredToken = (tok) => {
+    const shift = playShift - (isTeacher ? capo.capo : 0);
+    return shift % 12 === 0 ? tok : transposeChordToken(tok, shift, useFlats);
+  };
+
+  // The key under the fingers: the playing key with the capo taken off.
+  const legendKey = useMemo(() => {
+    if (!key) return null;
+    const drop = isTeacher ? capo.capo : 0;
+    if (!drop) return key;
+    const pc = (((key.tonicPc - drop) % 12) + 12) % 12;
+    return { tonic: pcToName(pc, useFlats), tonicPc: pc, mode: key.mode };
+  }, [key, isTeacher, capo.capo, useFlats]);
+
+  // Nashville numbers are measured against the key the CHART IS WRITTEN IN,
+  // always. They are independent of the capo and of the playing key: a 1 is a
+  // 1 in every key, and a diatonic song can never show a b3 or a b7.
   const chordText = (tok) => {
-    if (!key) return tok;
-    const n = toNashville(tok, key);
-    return fromSet ? n : (<>{n} <small>({tok})</small></>);
+    if (!writtenKey) return tok;
+    const n = toNashville(tok, writtenKey);
+    return fromSet ? n : (<>{n} <small>({fingeredToken(tok)})</small></>);
   };
 
   // Pointer-drag reorder (works with touch); arrows are the fallback.
@@ -859,7 +928,7 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, i
     // setPages to an equal value is skipped above, and React drops a set to
     // the identical null — so this converges instead of spinning.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chartId, page, pages, blockOrder, insertBlocks, prefs.gloss, prefs.legend, prefs.roadmapFull, editing, capo.capo, capo.cut, keyOverride, showNotice, cutOn]);
+  }, [chartId, page, pages, blockOrder, insertBlocks, prefs.gloss, prefs.legend, prefs.roadmapFull, editing, capo.capo, capo.cut, keyOverride, chartKeyOverride, showNotice, cutOn]);
 
   // Pointer events, not touch events: the same code path serves the
   // iPad on stage and a mouse on the laptop while testing.
@@ -974,10 +1043,28 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, i
           <button className="sb-key-main" onClick={() => setPickKey((v) => !v)} title="Tap to change key">{keyHeader()}</button>
           {pickKey && (
             <>
-              <select value={key ? keyName(key) : ""} onChange={(e) => { const v = e.target.value; setKeyOverride(v); lsSet("songbook_key_" + chartId, v); setPickKey(false); }}>
-                {KEY_LIST.flatMap((k) => [k, k + "m"]).map((k) => <option key={k} value={k}>{k}</option>)}
-              </select>
-              {keyOverride && <button className="sb-tool" onClick={() => { setKeyOverride(null); lsSet("songbook_key_" + chartId, null); setPickKey(false); }}>Reset to {detected ? detected.tonic : "?"}</button>}
+              <label className="sb-capo-lbl">Play in
+                <select value={key ? keyName(key) : ""} onChange={(e) => { const v = e.target.value; setKeyOverride(v); lsSet("songbook_key_" + chartId, v); setPickKey(false); }}>
+                  {KEY_LIST.flatMap((k) => [k, k + "m"]).map((k) => <option key={k} value={k}>{k}</option>)}
+                </select>
+              </label>
+              {/* One tap back to the chart's own key. */}
+              {keyOverride && <button className="sb-tool" onClick={() => { setKeyOverride(null); lsSet("songbook_key_" + chartId, null); setPickKey(false); }}>Play in {writtenKey ? keyName(writtenKey) : "?"} (the chart's key)</button>}
+              {/* Correcting the CHART, not the performance — a rare fix for
+                  detection having read the chart's own key wrong, and the only
+                  control here that moves the numbers. Kept behind a second tap
+                  so it can never be hit while reaching for the playing key. */}
+              {isTeacher && !fixChartKey && !chartKeyOverride && (
+                <button className="sb-tool" title="Only if detection read the chart's own key wrong. This changes the numbers." onClick={() => setFixChartKey(true)}>Chart key…</button>
+              )}
+              {isTeacher && (fixChartKey || chartKeyOverride) && (
+                <label className="sb-capo-lbl" title="The key the CHART is written in. Changing it re-numbers the whole song.">Chart written in
+                  <select value={writtenKey ? keyName(writtenKey) : ""} onChange={(e) => { const v = e.target.value; setChartKeyOverride(v); lsSet("songbook_chartkey_" + chartId, v); }}>
+                    {KEY_LIST.flatMap((k) => [k, k + "m"]).map((k) => <option key={k} value={k}>{k}</option>)}
+                  </select>
+                </label>
+              )}
+              {chartKeyOverride && <button className="sb-tool" onClick={() => { setChartKeyOverride(null); lsSet("songbook_chartkey_" + chartId, null); setFixChartKey(false); }}>Chart key: back to {detected ? detected.tonic : "?"}</button>}
             </>
           )}
           {isTeacher && (
@@ -1015,14 +1102,16 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, i
           <button className={"sb-tool" + (editing ? " on" : "")} onClick={() => setEditing((v) => !v)}>{editing ? "Done" : "Reorder"}</button>
           {editing && <button className="sb-tool" onClick={() => setAddSecOpen(true)}>+ Add section</button>}
           {(customOrder || inserts.length > 0) && <button className="sb-tool" onClick={resetArrangement}>Reset order</button>}
-          {prefs.legend && key && keyLegend(key).map((l) => <span key={l.degree} className="sb-legend-i"><b>{l.degree}</b>={l.name}</span>)}
+          {/* The legend reads the same letters the chart prints beside the
+              numbers: the FINGERED key, capo included. */}
+          {prefs.legend && legendKey && keyLegend(legendKey).map((l) => <span key={l.degree} className="sb-legend-i"><b>{l.degree}</b>={l.name}</span>)}
           <span className="sb-bar-sp" />
         </div>
 
         {showNotice && (
           <div className="sb-notice">
             <span>Auto-corrected from <b>{detected.relativeMinor}</b> to <b>{detected.tonic} major</b>. This chart leans on the 6- chord (the pattern Planning Center labels as minor) but its cadences land on {detected.tonic}.</span>
-            <button className="sb-tool" onClick={() => { setKeyOverride(detected.relativeMinor); lsSet("songbook_key_" + chartId, detected.relativeMinor); }}>Use {detected.relativeMinor}</button>
+            <button className="sb-tool" onClick={() => { setChartKeyOverride(detected.relativeMinor); lsSet("songbook_chartkey_" + chartId, detected.relativeMinor); }}>Use {detected.relativeMinor}</button>
             <button className="sb-tool" onClick={() => { setNoticeDismissed(true); lsSet("songbook_notice_" + chartId, true); }}>OK</button>
           </div>
         )}
@@ -1105,9 +1194,12 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, i
 
       {navButtons}
 
+      {/* "How do I play this?" is asked about the SOUNDING chord in the key
+          the band is playing — the popups do the capo maths themselves, so
+          they get the transposed token, not the capo-adjusted one. */}
       {tapped && (cutOn
-        ? <CutCapoPopup token={tapped} capoSetting={capo} isTeacher={isTeacher} onClose={() => setTapped(null)} />
-        : <ChordPopup token={tapped} capoFret={capo.capo} instrument={instrument} onClose={() => setTapped(null)} />)}
+        ? <CutCapoPopup token={playShift ? transposeChordToken(tapped, playShift, useFlats) : tapped} capoSetting={capo} isTeacher={isTeacher} onClose={() => setTapped(null)} />
+        : <ChordPopup token={playShift ? transposeChordToken(tapped, playShift, useFlats) : tapped} capoFret={capo.capo} instrument={instrument} onClose={() => setTapped(null)} />)}
 
       {addSecOpen && (
         <AddSectionPicker index={index} hostChartId={chartId} hostKey={key} positions={blockOrder}
@@ -1724,7 +1816,10 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
           {setSongs.map((sg, i) => {
             const chart = library.charts[sg.chartId];
             const ovKey = (void keyTick, readKeyOverride(sg.chartId));
-            const shownKey = ovKey || (chart && chart.key ? chart.key.tonic + (chart.key.mode === "minor" ? "m" : "") : null);
+            // With no playing-key override the row shows the chart's own key —
+            // corrected, if detection had read the chart itself wrong.
+            const ownKey = readChartKeyOverride(sg.chartId) || (chart && chart.key ? chart.key.tonic + (chart.key.mode === "minor" ? "m" : "") : null);
+            const shownKey = ovKey || ownKey;
             const alts = [sg.entry.pt, sg.entry.en].filter((n) => n && n !== sg.title).join(" · ");
             return (
               <div key={sg.chartId + ":" + i}
@@ -1744,7 +1839,7 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
                 {/* The key, always visible while running the set, and tappable
                     to change it without opening the song first. */}
                 <button className={"sb-key-btn" + (ovKey ? " changed" : "")}
-                  title={ovKey ? "Key changed to " + ovKey : "Set the key for this song"}
+                  title={ovKey ? "Playing in " + ovKey + " today (chart is written in " + (ownKey || "?") + ")" : "Set the key this song is played in"}
                   onClick={(ev) => { ev.stopPropagation(); setKeyFor(keyFor === sg.chartId ? null : sg.chartId); }}>
                   {shownKey || "—"}
                 </button>
@@ -1778,9 +1873,10 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
             </div>
           ))}
 
-          {/* Key picker for one row. KEY_LIST is the same vocabulary the chart
-              view offers, and it writes the SAME songbook_key_<chartId> key,
-              so a key set here and one set in the chart are one fact. */}
+          {/* Key picker for one row: the key the band PLAYS it in today. Same
+              vocabulary as the chart view, writing the SAME
+              songbook_key_<chartId>, so a key set here and one set in the
+              chart are one fact. It never touches the numbers. */}
           {keyFor && (
             <div className="sb-modal" role="dialog" aria-modal="true" onClick={() => setKeyFor(null)}>
               <div className="sb-sheet" onClick={(ev) => ev.stopPropagation()}>
@@ -1802,12 +1898,12 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
                 {readKeyOverride(keyFor) && (
                   <div style={{ marginTop: 12 }}>
                     <button className="sb-ov-btn" onClick={() => setKeyForChart(keyFor, null)}>
-                      Reset to the chart's own key{library.charts[keyFor] && library.charts[keyFor].key ? " (" + library.charts[keyFor].key.tonic + ")" : ""}
+                      Reset to the chart's own key{readChartKeyOverride(keyFor) ? " (" + readChartKeyOverride(keyFor) + ")" : library.charts[keyFor] && library.charts[keyFor].key ? " (" + library.charts[keyFor].key.tonic + ")" : ""}
                     </button>
                   </div>
                 )}
                 <div className="sb-sheet-note" style={{ marginTop: 10 }}>
-                  Nashville numbers follow the key. The capo setting is separate and is not changed here.
+                  This is the key the band plays it in. The Nashville numbers do not change — a song's numbers are its structure — only the letters they resolve to. The capo setting is separate and is not changed here.
                 </div>
               </div>
             </div>

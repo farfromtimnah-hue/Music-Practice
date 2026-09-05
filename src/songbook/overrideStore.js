@@ -72,12 +72,43 @@ export const clearOverride = (serviceId, date) => drop(orderKey(serviceId, date)
 // ---------------------------------------------------------------------------
 // KEY OVERRIDES.
 //
-// The chart view already owns songbook_key_<chartId> and that mechanism is
-// kept exactly as it is — the set list writes the SAME key, so a key set from
-// either place is one fact, not two that can disagree. These helpers exist so
-// the set list can read and reset those keys without reaching into ChartView.
+// songbook_key_<chartId> is THE KEY THE BAND IS PLAYING IN. The chart view and
+// the set list both write it, so a key set from either place is one fact, not
+// two that can disagree. It changes the letters and the capo maths and nothing
+// else — the Nashville numbers are measured against the key the chart is
+// WRITTEN in, which is a different fact stored separately under
+// songbook_chartkey_<chartId> and changed only when detection read the chart
+// itself wrong (the relative-minor case).
 // ---------------------------------------------------------------------------
 export const keyKeyFor = (chartId) => "songbook_key_" + chartId;
+export const chartKeyKeyFor = (chartId) => "songbook_chartkey_" + chartId;
+export const readChartKeyOverride = (chartId) => read(chartKeyKeyFor(chartId), null);
+
+/**
+ * ONE-TIME MIGRATION. Before the split, "Use Em" on the relative-minor notice
+ * wrote songbook_key_, the same slot the set-list key picker uses — so after
+ * the split that stored value would read as "play this in Em today" and drag
+ * the letters with it. A saved key that is the RELATIVE MINOR of the chart's
+ * detected key was a chart correction, never a performance key, so it moves to
+ * the chart-key slot. Anything else is left exactly where it is: a real key
+ * change called in rehearsal keeps working.
+ */
+export const migrateRelativeMinorKey = (chartId, detected) => {
+  if (!detected || detected.mode !== "major") return;
+  const saved = read(keyKeyFor(chartId), null);
+  if (!saved || read(chartKeyKeyFor(chartId), null)) return;
+  const m = /^([A-G](?:#|b)?)(m|min|-)$/.exec(String(saved).trim());
+  if (!m) return;                       // a major key: a performance key, leave it
+  const NOTE = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+  let pc = NOTE[m[1][0]];
+  if (pc == null) return;
+  for (const ch of m[1].slice(1)) { if (ch === "#") pc += 1; else if (ch === "b") pc -= 1; }
+  pc = ((pc % 12) + 12) % 12;
+  if (pc !== (detected.tonicPc + 9) % 12) return;   // not the relative minor
+  write(chartKeyKeyFor(chartId), saved);
+  drop(keyKeyFor(chartId));
+};
+
 export const readKeyOverride = (chartId) => read(keyKeyFor(chartId), null);
 export const writeKeyOverride = (chartId, keyName) => {
   if (keyName) write(keyKeyFor(chartId), keyName);

@@ -91,6 +91,18 @@ export const toNashville = (token, key) => {
   return out;
 };
 
+// Transpose one chord token by `semitones`, keeping the suffix and any slash
+// bass. This is what a KEY CHANGE does to a chart: the letters move, the
+// harmonic structure (and therefore the Nashville numbers) does not.
+export const transposeChordToken = (tok, semitones, useFlats) => {
+  const chord = parseChord(tok);
+  if (!chord) return tok;
+  const shift = (pc) => (((pc + semitones) % 12) + 12) % 12;
+  let out = pcToName(shift(chord.rootPc), useFlats) + chord.suffix;
+  if (chord.bass) out += "/" + pcToName(shift(chord.bassPc), useFlats);
+  return out;
+};
+
 // Legend rows: degree -> letter name for the given key (1 = C, 2 = D, ...).
 export const keyLegend = (key) => {
   const useFlats = /b/.test(key.tonic) || key.tonic === "F";

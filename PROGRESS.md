@@ -1003,3 +1003,59 @@ Two pieces of work on the tuner, committed separately so a Pages deploy fired on
 **Pitch detection inside the modal was likewise not confirmed against a real string** for the same reason — no mic. "Audio: running" confirms the AudioContext resumed, which is the iOS gesture-chain check, but no audio was ever detected in the browser. All detection evidence in Part 1 is from synthesised harmonic-rich plucks run through `detectPitch` in node, which is a real test of the range and the maths but not of a guitar in a room. **The 392 Hz high-E case in particular should be checked with an actual guitar at capo 3.**
 
 The keys-student gate was verified by reading that the condition is character-identical to the existing route's and that `instrument` is threaded correctly, plus observing the button present for Teacher — not by signing in as a keys student, whose PIN is a real per-child credential and was not used. `resize_window` moves the OS window without changing the inner viewport in this harness (as recorded in earlier entries), so the iPad check is a measurement against the viewport the harness reports (1194×648), not a genuinely different device box. The set fetching, caching and refresh logic was not touched: `setStore.js` is byte-identical and a diff of `Songbook.jsx` filtered for `fetchSet` / `readCachedSet` / `setSetData` / `loading` / `disconnected` / `refresh` shows no added or removed line.
+
+---
+
+## Key override: change what the numbers RESOLVE TO, not the numbers
+
+### The bug
+
+`Songbook.jsx` computed one key and used it for everything:
+
+```js
+const key = (keyOverride && parseKeyName(keyOverride)) || detected;
+```
+
+That single value was fed to `toNashville`, so overriding the key **re-measured every chord against the new tonic**. A chart written in C, overridden to D, had F read as `b3`, C as `b7` and G as `4`. That is not transposition — it relabels the song as if it were a different song. Confirmed on a real device: Holy Forever, written in C, overridden to D, rendering `b3` and `b7` throughout under a header reading "Key: D - Capo 5 (A) + cut capo (fret 7)".
+
+**The music fact this rests on.** A song's Nashville numbers never change. Holy Forever is 1 4 5 6- 2- 3- and that is a property of the *song*, not of the key it is played in — the whole point of the system is that you transpose by changing what "1" maps to, never by renumbering the chart. A diatonic worship song can never display b3 or b7.
+
+### Two facts had been conflated into one value
+
+- **The key the chart is WRITTEN in.** A property of the chart data, and the only thing the numbers are ever measured against. Changing it means "detection read the chart wrong" — real, but rare.
+- **The key the band is PLAYING in.** Drives the letters beside the numbers, the header, and the capo maths. This is what changes at rehearsal when the leader calls a different key.
+
+They are now separate: `writtenKey` and `playKey`, with `playShift` the semitone distance between them. `toNashville` is passed `writtenKey` and nothing else, so **the numbers are byte-identical at every playing key**. The letters in parentheses are `transposeChordToken(tok, playShift - capo)` — transpose the page into the room's key, then take the capo off, because with a capo on the chord under the hand is not the chord that sounds. The legend follows the same fingered key.
+
+**Storage.** `songbook_key_<chartId>` keeps its meaning as the playing key, which is what the set-list picker already writes, so a key set from the set list and one set in the chart stay one fact. The chart-key correction is a new, separate `songbook_chartkey_<chartId>`.
+
+**The mode comes from the chart, not the override.** "Put it in D" moves where 1 sits; it does not turn a major song minor. Only the tonic is taken from a playing-key override — otherwise the header could read "Am" over letters that are plainly A major, which it did in an intermediate version of this work.
+
+**Migration.** "Use Em" on the relative-minor notice used to write `songbook_key_`, the same slot the set-list picker uses — so after the split those stored values would have read as "play this in Em today" and dragged the letters with them. `migrateRelativeMinorKey` moves a saved key that is the **relative minor of the chart's detected key** into the chart-key slot and leaves everything else exactly where it is, so a real key called in rehearsal keeps working.
+
+### Making it visible
+
+A leftover setting silently rewriting a chart is how this bug survived, so the header now says which fact is in force: `·set` when the band is playing it somewhere else today, `·chart` when the chart's own key was corrected. Both resets are one tap — "Play in C (the chart's key)" and "Chart key: back to G". The chart-key control, the only one that moves the numbers, sits behind a second tap ("Chart key…") so it can never be hit while reaching for the playing key; this was added after a stray dispatch during testing set it to Am and re-numbered the whole page, which is exactly the accident it now prevents.
+
+### Verified by actually running it
+
+`npx vite build` passes. Everything below was **run in real Chrome as Teacher against the live app**, not reasoned about:
+
+- **Holy Forever (written in C)** reads `1 4 5 6- 2- 1sus` on the EN chart and `1 4 1/3 6- 5 2-7 3- 2- 1sus` on the PT chart. No `b3`, no `b7` anywhere.
+- **Overridden to D**, the numbers are unchanged and only the letters move: `1 (D) 4 (G) 6- (Bm) 5 (A) 2- (Em) 1sus (Dsus)`. Legend `1=D 2-=Em 3-=F#m 4=G 5=A 6-=Bm`.
+- **Nine keys — C, D, E, F, G, Bb, F#, Ab, Am** — driven through the picker one at a time. The numbers never moved. Letters transposed with sensible spellings (Bb → `4 (Eb)`, F# → `4 (B)`, Ab → `4 (Db)`), slash bass included (`1/3 (D/F#)`, `1/3 (A/C#)`).
+- **Capo independence**: playing in D at capo 5, the header reads "Key: D ·set - Capo 5 (A)" and the chords read `1 (A) 4 (D) 6- (F#m) 5 (E) 1sus (Asus)` — the fingered shapes, not the sounding ones. Numbers unchanged at capo 0, 2 and 5. Resetting the key left the capo at 5 and vice versa.
+- **A `b7` verified by hand**: `always-on-time-en` is written in F and contains Eb. Eb is a semitone below E, F's seventh degree, so `b7` is correct and genuinely non-diatonic. `autoridade-e-poder-medley` in A gives G=`b7` and C=`b3` on the same reasoning.
+- **Quem é Como Nosso Deus** still auto-corrects: the notice appears, "Use Em" now writes the *chart* key, the header marks `·chart`, and the chart re-numbers as E minor (`b6 b7 1-7 b3/5 4-7`) while the letters stay C, D, Em7, G/B — the sounding chords are untouched, which is right, because this is a re-reading of the chart rather than a transposition. Combining it with playing in A gives "Key: Am ·set ·chart Em" with the same minor numbers and the letters moved to F, G, Am7, C/E. Both resets return the expected states.
+- **The migration** was tested by seeding the old shape: `songbook_key_quem-e-como-nosso-deus = "Em"` and `songbook_key_holy-forever = "D"`, then reloading. The Em moved to `songbook_chartkey_` and re-numbered as minor; the D stayed a playing key with the numbers unchanged and the letters in D.
+- **The set-list picker** writes the playing key and its tooltip now states both facts ("Playing in Bb today (chart is written in G)"). Setting Bb on Here as In Heaven left its numbers identical to G, and the chart view reset it in one tap.
+
+### Caveats
+
+The relative-minor correction was verified on **Quem é Como Nosso Deus** only, which is the case the brief named; the other charts `detectKey` flags with `minorSurface` were not opened one by one. The nine keys tested are a spread across sharps, flats and enharmonics rather than all twelve — D#, and the `m` variants other than Am, were exercised only through the node harness over the same code path, where all twelve behave.
+
+Enharmonic spelling of the parenthesised letters follows the **playing key's** accidental preference, so playing a flat-key chart in F# prints `D#m` rather than `Ebm`. That is defensible and matches `pcToName`'s existing convention, but it is a choice, not a derivation from the chart's own spelling, and it may read oddly on a chart that leans hard the other way.
+
+`songbook_chartkey_` is a new localStorage key with no eviction path of its own; it is cleared by its own one-tap reset but is **not** touched by the set list's "Reset to Planning Center", which deliberately clears only playing keys — a corrected chart key is a fact about the chart, not about today's set, and should survive the reset. That is the intended behaviour but it is worth knowing it is there.
+
+The set fetching, caching and refresh logic was not touched: `setStore.js` is byte-identical, and nothing in `src/tuner/`, `src/cutcapo/` or `src/openvoicings/` was modified.
