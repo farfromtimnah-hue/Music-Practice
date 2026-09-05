@@ -15,7 +15,7 @@
 //
 // src/cutcapo/ is imported, never modified.
 // ============================================================
-import { STRINGS, NUM_STRINGS, CAPO_FRET, noteAtFret, CHROMA } from "../cutcapo/tuning.js";
+import { STRINGS, NUM_STRINGS, CAPO_FRET, noteAtFret, CHROMA, isCapoed } from "../cutcapo/tuning.js";
 
 const STRING_GAP = 22;
 const FRET_GAP = 34;
@@ -28,7 +28,7 @@ const SINGLE_INLAYS = [3, 5, 7, 9, 12];
 // Window the board so the shape fits. Frets here are ABSOLUTE (nut = 0). The
 // window starts at the full capo (or the nut) and runs far enough to cover the
 // cut capo and the highest fingered note.
-const windowFor = (shape, capo, cut) => {
+const windowFor = (shape, capo, cut, minFrets) => {
   const fretted = shape.filter((f) => f != null && f > 0).map((f) => f + capo);
   const need = Math.max(
     capo + CAPO_FRET + 1,
@@ -36,11 +36,24 @@ const windowFor = (shape, capo, cut) => {
     fretted.length ? Math.max(...fretted) + 1 : 0
   );
   const first = Math.max(1, capo + 1 - (capo > 0 ? 1 : 0));
-  return { first, last: Math.min(Math.max(need, first + 3), 14) };
+  // Editing needs somewhere to put a finger, so the board stays wide even when
+  // the current shape is all open.
+  const span = Math.max(3, (minFrets || 0) - 1);
+  return { first, last: Math.min(Math.max(need, first + span), 14) };
 };
 
-export default function CutCapoDiagram({ shape, showNotes = true, capo = 0, cut = true }) {
-  const { first, last } = windowFor(shape, capo, cut);
+/**
+ * `interactive` turns the board into the shape editor: tapping a fret cell
+ * toggles that string to it, and the markers left of the nut cycle a string
+ * between ringing open and muted. Frets behind the cut capo are not offered on
+ * the capoed strings — the capo mutes them on a real guitar, so they are not
+ * hers to choose. Teacher-only; the read-only board is unchanged without it.
+ */
+export default function CutCapoDiagram({
+  shape, showNotes = true, capo = 0, cut = true,
+  interactive = false, onChange,
+}) {
+  const { first, last } = windowFor(shape, capo, cut, interactive ? 7 : 0);
   const cutAbs = capo + CAPO_FRET;   // where the cut capo physically sits
   const absFret = (f) => f + capo;   // engine fret -> absolute fret
   const count = last - first + 1;
@@ -57,8 +70,10 @@ export default function CutCapoDiagram({ shape, showNotes = true, capo = 0, cut 
   const uid = shape.map((f) => (f == null ? "x" : f)).join("");
 
   return (
-    <svg viewBox={`0 0 ${boardW} ${boardH}`} style={{ width: "100%", maxWidth: boardW, height: "auto" }}
-      role="img" aria-label={"Cut capo shape " + uid}>
+    <svg viewBox={`0 0 ${boardW} ${boardH}`}
+      style={{ width: "100%", maxWidth: boardW, height: "auto", touchAction: "manipulation" }}
+      role={interactive ? "group" : "img"}
+      aria-label={interactive ? "Edit cut capo shape" : "Cut capo shape " + uid}>
       <defs>
         <linearGradient id={"sbWood" + uid} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#5a3a22" />
@@ -118,6 +133,29 @@ export default function CutCapoDiagram({ shape, showNotes = true, capo = 0, cut 
           stroke="#cfcfd8" strokeWidth={Math.max(1.1, st.w * 0.72)} strokeLinecap="round" />
       ))}
 
+      {/* tap targets — one cell per playable position, drawn under the dots so
+          the dots stay crisp. A cell that is already fingered clears itself. */}
+      {interactive && STRINGS.map((st, s) =>
+        Array.from({ length: count }, (_, i) => first + i).map((abs) => {
+          const f = abs - capo;                       // absolute -> engine fret
+          if (f <= 0) return null;                    // open is the nut marker
+          if (isCapoed(s) && f <= CAPO_FRET) return null; // behind the cut capo
+          if (noteAtFret(s, f) == null) return null;
+          return (
+            <rect key={"tap" + s + "-" + abs}
+              x={noteX(abs) - FRET_GAP / 2} y={stringY(s) - STRING_GAP / 2}
+              width={FRET_GAP} height={STRING_GAP}
+              fill="transparent" style={{ cursor: "pointer" }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange(shape.map((cur, i) => (i === s ? (cur === f ? null : f) : cur)));
+              }}>
+              <title>{`String ${st.short}, fret ${abs}`}</title>
+            </rect>
+          );
+        })
+      )}
+
       {/* fingered notes */}
       {STRINGS.map((st, s) => {
         const f = shape[s];
@@ -139,9 +177,27 @@ export default function CutCapoDiagram({ shape, showNotes = true, capo = 0, cut 
       {STRINGS.map((st, s) => {
         const f = shape[s];
         const y = stringY(s);
+        // In the editor this marker toggles the string between ringing and muted.
+        const toggle = interactive
+          ? (e) => {
+              e.stopPropagation();
+              onChange(shape.map((cur, i) => (i === s ? (cur === 0 ? null : 0) : cur)));
+            }
+          : undefined;
+        const hit = interactive && (
+          <rect x={noteX(0) - 11} y={y - STRING_GAP / 2} width="22" height={STRING_GAP}
+            fill="transparent" style={{ cursor: "pointer" }} onClick={toggle}>
+            <title>{`String ${st.short}: ringing or muted`}</title>
+          </rect>
+        );
         if (f == null) {
-          return <text key={"m" + s} x={noteX(0)} y={y + 4} textAnchor="middle" fontSize="11"
-            fontWeight="700" fill="#ef5350">✕</text>;
+          return (
+            <g key={"m" + s}>
+              <text x={noteX(0)} y={y + 4} textAnchor="middle" fontSize="11"
+                fontWeight="700" fill="#ef5350">✕</text>
+              {hit}
+            </g>
+          );
         }
         if (f === 0) {
           const n = noteAtFret(s, 0);
@@ -152,10 +208,11 @@ export default function CutCapoDiagram({ shape, showNotes = true, capo = 0, cut 
                 <text x={noteX(0)} y={y + 2.8} textAnchor="middle" fontSize="7"
                   fontFamily="Oswald,sans-serif" fill="#81c784">{CHROMA[n]}</text>
               )}
+              {hit}
             </g>
           );
         }
-        return null;
+        return hit ? <g key={"m" + s}>{hit}</g> : null;
       })}
     </svg>
   );

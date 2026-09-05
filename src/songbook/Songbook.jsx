@@ -6,7 +6,10 @@ import { SERVICE_TYPES, STUDENT_SERVICE_IDS, defaultDateFor, readCachedSet, fetc
 import { toNashville, keyLegend, capoLabel, keyName, parseKeyName, transposedKeyName, KEY_LIST } from "./chords.js";
 import { abbreviationsFor } from "./sections.js";
 import { readOverride, writeOverride, clearOverride, readKeyOverride, writeKeyOverride, clearKeyOverrides, basisOf, basisDiffers } from "./overrideStore.js";
-import { cutCapoAnswerFor, normalizeCapoSetting, cutFretOf, MAX_FULL_CAPO } from "./cutcapoAdapter.js";
+import {
+  cutCapoAnswerFor, normalizeCapoSetting, cutFretOf, MAX_FULL_CAPO,
+  savedShapesFor, saveShapeFor, deleteSavedShape, analyseShape,
+} from "./cutcapoAdapter.js";
 import { guitarAnswerFor, chordNotesFor } from "./chordshapes.js";
 import CutCapoDiagram from "./CutCapoDiagram.jsx";
 import ChordDiagram from "./ChordDiagram.jsx";
@@ -174,6 +177,22 @@ const S = `
 .sb-cc-no-head{font-family:'Oswald',sans-serif;font-size:19px;color:#ff8a80;letter-spacing:1px;margin-bottom:5px;}
 .sb-cc-no-body{font-size:14px;color:#e8c4c2;line-height:1.45;}
 .sb-cc-warn{font-size:12px;color:#e0b050;background:rgba(240,192,64,.08);border:1px solid rgba(240,192,64,.3);border-radius:9px;padding:7px 9px;margin-top:10px;line-height:1.4;}
+/* Nicole's own pinned shapes — marked so they never read as generated ones. */
+.sb-cc-mine{border-color:#3a6a4a;background:rgba(129,199,132,.05);}
+.sb-cc-badge{font-family:'Oswald',sans-serif;color:#81c784;letter-spacing:1px;text-transform:uppercase;font-size:11px;}
+.sb-cc-editing{border-color:#5a5a2a;background:rgba(240,192,64,.05);}
+.sb-cc-added{font-size:12px;color:#81c784;margin-top:6px;line-height:1.4;}
+.sb-cc-name{margin-top:8px;font-size:13px;color:#8888aa;}
+.sb-cc-name-main{font-family:'Oswald',sans-serif;font-size:20px;color:#f0c040;letter-spacing:1px;}
+.sb-cc-name-sub{font-size:12px;color:#8888aa;}
+.sb-cc-name-hint{font-size:12px;color:#8888aa;}
+.sb-cc-btns{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+.sb-cc-btn{flex:1;min-width:140px;background:#f0c040;color:#141018;border:none;border-radius:9px;padding:9px 12px;font-family:'Oswald',sans-serif;font-size:14px;letter-spacing:1px;cursor:pointer;}
+.sb-cc-btn:disabled{opacity:.45;cursor:default;}
+.sb-cc-btn.ghost{background:transparent;color:#c8c8dd;border:1px solid #2a2a40;}
+.sb-cc-rowbtns{display:flex;gap:6px;}
+.sb-cc-mini{background:transparent;color:#8888aa;border:1px solid #2a2a40;border-radius:7px;padding:3px 9px;font-size:11px;cursor:pointer;}
+.sb-cc-mini:hover{color:#e8e8f0;border-color:#4a4a66;}
 /* set navigation — one gesture to the next song, on stage, mid-song */
 /* Nothing here scrolls, so the browser has no pan of its own to protect and
    every gesture is ours to read. */
@@ -777,7 +796,7 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, serviceTypeId,
       {navButtons}
 
       {tapped && (cutOn
-        ? <CutCapoPopup token={tapped} capoSetting={capo} onClose={() => setTapped(null)} />
+        ? <CutCapoPopup token={tapped} capoSetting={capo} isTeacher={isTeacher} onClose={() => setTapped(null)} />
         : <ChordPopup token={tapped} capoFret={capo.capo} instrument={instrument} onClose={() => setTapped(null)} />)}
     </div>
   );
@@ -894,11 +913,37 @@ function ChordPopup({ token, capoFret = 0, instrument, onClose }) {
 // ============================================================
 // CUT CAPO POPUP — the question this feature exists to answer:
 // does this chord survive the cut capo, yes or no?
+//
+// Nicole's own pinned shapes come FIRST when she has any: she has played this
+// capo for years and the generator is the fallback, not the authority. The
+// editor below is teacher-only — students get the plain read-only answer.
 // ============================================================
-function CutCapoPopup({ token, capoSetting, onClose }) {
+function CutCapoPopup({ token, capoSetting, isTeacher, onClose }) {
   const result = useMemo(() => cutCapoAnswerFor(token, capoSetting, 2), [token, capoSetting]);
   const capo = result.capo || 0;
   const setup = (capo > 0 ? "capo " + capo + " + " : "") + "cut capo at fret " + result.cutFret;
+
+  // Pinned shapes for this chord at this capo. `stamp` re-reads after a write.
+  const [stamp, setStamp] = useState(0);
+  const mine = useMemo(
+    () => (result.status === "not-a-chord" ? [] : savedShapesFor(token, capo)),
+    [token, capo, stamp, result.status]
+  );
+
+  // Editor state: null = closed, otherwise { shape, id } being worked on.
+  const [edit, setEdit] = useState(null);
+  const canEdit = isTeacher && result.status !== "not-a-chord";
+  const reading = useMemo(() => (edit ? analyseShape(edit.shape, capo) : null), [edit, capo]);
+
+  const startEdit = (shape, id) => setEdit({ shape: shape.slice(), id: id || null });
+  const commit = () => {
+    if (!edit) return;
+    saveShapeFor(token, edit.shape, capo, edit.id ? { id: edit.id } : {});
+    setEdit(null);
+    setStamp((n) => n + 1);
+  };
+  const remove = (id) => { deleteSavedShape(id); setStamp((n) => n + 1); };
+
   return (
     <div className="sb-modal" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="sb-sheet" onClick={(e) => e.stopPropagation()}>
@@ -919,7 +964,60 @@ function CutCapoPopup({ token, capoSetting, onClose }) {
           </div>
         )}
 
-        {result.status === "unplayable" && (
+        {/* ---- the editor, when open ---- */}
+        {edit && (
+          <div className="sb-cc-card sb-cc-editing">
+            <div className="sb-cc-card-top">
+              <span>{edit.id ? "Editing my shape" : "New shape"}</span>
+              <span>tap frets · tap ○/✕ to ring or mute</span>
+            </div>
+            <CutCapoDiagram shape={edit.shape} capo={capo} cut interactive
+              onChange={(next) => setEdit((e) => ({ ...e, shape: next }))} />
+            <div className="sb-cc-name">
+              {reading.sounding < 2
+                ? <span className="sb-cc-name-hint">Place a couple of notes to name the shape.</span>
+                : reading.best
+                  ? <>
+                      <span className="sb-cc-name-main">{reading.best.name}</span>
+                      {!reading.best.exact && reading.best.missing.length > 0 &&
+                        <span className="sb-cc-name-sub"> · {reading.best.missing.join(" & ")} omitted</span>}
+                      {reading.alternates.length > 0 &&
+                        <span className="sb-cc-name-sub"> · also {reading.alternates.map((n) => n.name).join(" · ")}</span>}
+                    </>
+                  : <span className="sb-cc-name-hint">No standard name — but these notes are exactly what rings.</span>}
+            </div>
+            <div className="sb-cc-card-top" style={{ marginTop: 6 }}>
+              <span>Notes low→high{capo > 0 ? " (sounding)" : ""}</span>
+              <span className="sb-cc-notes">{reading.notes.length ? reading.notes.join(" · ") : "—"}</span>
+            </div>
+            <div className="sb-cc-btns">
+              <button className="sb-cc-btn" onClick={commit} disabled={reading.sounding === 0}>Save for {result.soundingLabel}</button>
+              <button className="sb-cc-btn ghost" onClick={() => setEdit(null)}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {/* ---- her own shapes, always above anything generated ---- */}
+        {!edit && mine.map((s) => (
+          <div className="sb-cc-card sb-cc-mine" key={s.id}>
+            <div className="sb-cc-card-top">
+              <span className="sb-cc-badge">My shape{s.name && s.name !== result.soundingLabel ? " · " + s.name : ""}</span>
+              {isTeacher && (
+                <span className="sb-cc-rowbtns">
+                  <button className="sb-cc-mini" onClick={() => startEdit(s.shape, s.id)}>Edit</button>
+                  <button className="sb-cc-mini" onClick={() => remove(s.id)}>Delete</button>
+                </span>
+              )}
+            </div>
+            <CutCapoDiagram shape={s.shape} capo={capo} cut />
+            <div className="sb-cc-card-top" style={{ marginTop: 6 }}>
+              <span>Notes low→high{capo > 0 ? " (sounding)" : ""}</span>
+              <span className="sb-cc-notes">{(s.notes || []).join(" · ")}</span>
+            </div>
+          </div>
+        ))}
+
+        {result.status === "unplayable" && !edit && (
           <div className="sb-cc-no">
             <div className="sb-cc-no-head">Not playable with the cut capo</div>
             <div className="sb-cc-no-body">
@@ -931,13 +1029,13 @@ function CutCapoPopup({ token, capoSetting, onClose }) {
           </div>
         )}
 
-        {result.status === "ok" && (
+        {result.status === "ok" && !edit && (
           <>
             {result.reduced && <div className="sb-cc-warn">Shown as the nearest chord the cut-capo engine models; added colour tones are not drawn.</div>}
             {result.voicings.map((v, i) => (
               <div className="sb-cc-card" key={i}>
                 <div className="sb-cc-card-top">
-                  <span>{i === 0 ? "Best shape" : "Alternative"}</span>
+                  <span>{mine.length ? (i === 0 ? "Suggested" : "Alternative") : (i === 0 ? "Best shape" : "Alternative")}</span>
                   <span>{v.openCount} ringing · {v.frettedCount === 0 ? "no fingers" : v.frettedCount + " fingered"}{v.span > 0 ? " · " + (v.span + 1) + "-fret span" : ""}</span>
                 </div>
                 <CutCapoDiagram shape={v.shape} capo={capo} cut />
@@ -945,9 +1043,25 @@ function CutCapoPopup({ token, capoSetting, onClose }) {
                   <span>Notes low→high{capo > 0 ? " (sounding)" : ""}</span>
                   <span className="sb-cc-notes">{v.notes.join(" · ")}</span>
                 </div>
+                {v.added && v.added.length > 0 && (
+                  <div className="sb-cc-added">Open strings add {v.added.join(" & ")} — the ring a cut capo is for.</div>
+                )}
+                {isTeacher && (
+                  <div className="sb-cc-btns">
+                    <button className="sb-cc-btn ghost" onClick={() => startEdit(v.shape, null)}>Use &amp; edit this</button>
+                  </div>
+                )}
               </div>
             ))}
           </>
+        )}
+
+        {canEdit && !edit && (
+          <div className="sb-cc-btns">
+            <button className="sb-cc-btn" onClick={() => startEdit(mine.length ? mine[0].shape : [null, null, null, null, null, null], null)}>
+              + Pin my own shape for {result.soundingLabel}
+            </button>
+          </div>
         )}
       </div>
     </div>
