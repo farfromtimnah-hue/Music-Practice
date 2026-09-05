@@ -11,6 +11,7 @@ import {
   savedShapesFor, saveShapeFor, deleteSavedShape, analyseShape,
 } from "./cutcapoAdapter.js";
 import { readInserts, addInsert, removeInsert, clearInserts, resolveInsert, isInsertId } from "./insertStore.js";
+import Tuner from "../tuner/Tuner.jsx";
 import { guitarAnswerFor, chordNotesFor } from "./chordshapes.js";
 import CutCapoDiagram from "./CutCapoDiagram.jsx";
 import ChordDiagram from "./ChordDiagram.jsx";
@@ -183,6 +184,15 @@ const S = `
 .sb-modal{position:fixed;inset:0;background:rgba(0,0,0,.82);display:flex;align-items:flex-end;justify-content:center;z-index:500;}
 .sb-sheet{background:#0e0e16;border:1.5px solid #2a2a40;border-radius:16px 16px 0 0;width:100%;max-width:560px;max-height:86vh;overflow-y:auto;padding:16px 16px 26px;}
 @media (min-width:600px){.sb-modal{align-items:center;}.sb-sheet{border-radius:16px;}}
+/* The tuner over the chart. It scrolls INSIDE its own sheet so the chart
+   underneath never moves — closing has to land on the same page at the same
+   scroll position, which is the whole reason this is a modal. */
+.sb-tuner-modal{align-items:center;}
+.sb-tuner-sheet{background:#0e0e16;border:1.5px solid #2a2a40;border-radius:16px;width:100%;max-width:560px;
+  max-height:92vh;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:10px 12px 18px;}
+@media (max-width:599px){.sb-tuner-sheet{max-height:100vh;height:100vh;border-radius:0;border:none;}}
+/* Pressed in a hurry mid-service, so it gets the 44px touch minimum. */
+.sb-tune{min-height:44px;padding-left:14px;padding-right:14px;}
 .sb-sheet-top{display:flex;align-items:baseline;gap:10px;margin-bottom:4px;}
 .sb-sheet-name{font-family:'Oswald',sans-serif;font-size:24px;font-weight:700;color:var(--gold,#f0c040);letter-spacing:1px;}
 .sb-sheet-sub{font-size:13px;color:#8888aa;}
@@ -537,9 +547,14 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, i
   // Sections borrowed from OTHER songs, living in this chart's block sequence.
   const [inserts, setInserts] = useState(() => readInserts(chartId));
   const [addSecOpen, setAddSecOpen] = useState(false);
+  // The tuner rides OVER the chart rather than replacing it: on stage a guitar
+  // drifts mid-set, and backing out to the tuner screen loses her place in the
+  // song. The chart stays mounted underneath, so closing returns to exactly
+  // the same song, page, scroll position, capo and key — nothing reloads.
+  const [tunerOpen, setTunerOpen] = useState(false);
   const dragRef = useRef(null);
 
-  useEffect(() => { setKeyOverride(lsGet("songbook_key_" + chartId, null)); setNoticeDismissed(lsGet("songbook_notice_" + chartId, false)); setCustomOrder(lsGet("songbook_order_" + chartId, null)); setCapoState(normalizeCapoSetting(lsGet("songbook_capo_" + chartId, null))); setInserts(readInserts(chartId)); setEditing(false); setPickKey(false); setTapped(null); setAddSecOpen(false); }, [chartId]);
+  useEffect(() => { setKeyOverride(lsGet("songbook_key_" + chartId, null)); setNoticeDismissed(lsGet("songbook_notice_" + chartId, false)); setCustomOrder(lsGet("songbook_order_" + chartId, null)); setCapoState(normalizeCapoSetting(lsGet("songbook_capo_" + chartId, null))); setInserts(readInserts(chartId)); setEditing(false); setPickKey(false); setTapped(null); setAddSecOpen(false); setTunerOpen(false); }, [chartId]);
   // Keep the app's inactivity timer from blanking a chart that is open on stage.
   useEffect(() => { if (!onKeepAlive) return; const t = setInterval(onKeepAlive, 60 * 1000); return () => clearInterval(t); }, [onKeepAlive]);
 
@@ -989,6 +1004,14 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, i
           <button className={"sb-tool" + (prefs.legend ? " on" : "")} onClick={() => setPrefs({ ...prefs, legend: !prefs.legend })}>Legend</button>
           {chart.glossCount > 0 && <button className={"sb-tool" + (prefs.gloss !== false ? " on" : "")} onClick={() => setPrefs({ ...prefs, gloss: prefs.gloss === false })}>Gloss</button>}
           {!chart.abbrevCollision && <button className={"sb-tool" + (prefs.roadmapFull ? " on" : "")} onClick={() => setPrefs({ ...prefs, roadmapFull: !prefs.roadmapFull })}>{prefs.roadmapFull ? "Full" : "Letters"}</button>}
+          {/* Tuning is gated exactly like the standalone tuner route: keys
+              students never see it, everyone else (and the teacher) does.
+              onClick, not a deferred handler — on iOS the AudioContext only
+              resumes inside a real gesture, and mounting the tuner
+              synchronously from this tap keeps that chain intact. */}
+          {instrument !== "keys" && (
+            <button className={"sb-tool sb-tune" + (tunerOpen ? " on" : "")} onClick={() => setTunerOpen(true)}>🎯 Tune</button>
+          )}
           <button className={"sb-tool" + (editing ? " on" : "")} onClick={() => setEditing((v) => !v)}>{editing ? "Done" : "Reorder"}</button>
           {editing && <button className="sb-tool" onClick={() => setAddSecOpen(true)}>+ Add section</button>}
           {(customOrder || inserts.length > 0) && <button className="sb-tool" onClick={resetArrangement}>Reset order</button>}
@@ -1089,6 +1112,20 @@ function ChartView({ entry, chartId, fromSet, setNav, onNavigate, onLoadWhole, i
       {addSecOpen && (
         <AddSectionPicker index={index} hostChartId={chartId} hostKey={key} positions={blockOrder}
           onInsert={insertSection} onLoadWhole={onLoadWhole} onClose={() => setAddSecOpen(false)} />
+      )}
+
+      {/* THE TUNER, over the chart. The chart is NOT unmounted — that is the
+          entire point: her place, page, capo and key all survive because
+          nothing about the chart re-runs. Unmounting Tuner on close is what
+          releases the microphone: its own cleanup stops the MediaStream
+          tracks, so no mic is left live through a service. */}
+      {tunerOpen && (
+        <div className="sb-modal sb-tuner-modal" role="dialog" aria-modal="true">
+          <div className="sb-tuner-sheet" onClick={(e) => e.stopPropagation()}>
+            <Tuner instrument={instrument === "bass" ? "bass" : "guitar"} isTeacher={isTeacher}
+              onBack={() => setTunerOpen(false)} />
+          </div>
+        </div>
       )}
     </div>
   );
