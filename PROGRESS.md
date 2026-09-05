@@ -1278,3 +1278,212 @@ observed on screen with a genuinely keyless song.
 `setStore.js` gained a comment and nothing else; its caching and refresh logic
 is untouched. `src/tuner/`, `src/cutcapo/` and `src/openvoicings/` were not
 modified, and no worker route other than `/songbook/set` changed.
+
+---
+
+## Columns sized to content, choruses findable, repeated sections collapsed
+
+Three pieces of work on the chart layout, all measured in a real 1024x768 and
+2048x1536 viewport driven over the DevTools protocol rather than eyeballed.
+(`resize_window` in this harness moves the OS window without changing the inner
+viewport — recorded in an earlier entry — so the browser was launched at the
+size instead.)
+
+### What the wasted space actually was
+
+The report was that columns are far wider than the content and roughly 300px
+per column is wasted. Measured, that is not what is happening: at 1024x768 the
+columns are 321px against a longest rendered line of 312px, and at 2048 they are
+648px against 631px. The type already grows to fill the column. The ~360px
+figure in the report looks like a measurement of a block box or a short line
+rather than the widest rendered line.
+
+The real waste was the COLUMN COUNT. `maxColsFor` capped at three by a literal
+`Math.min(3, ...)`, and on a chord chart the count IS the point size: narrower
+columns mean more of them and less vertical distance to cover. "Teu Toque" at
+1024x768 fits 11.6px in three columns and 13.9px in four. That 20% was being
+left on the table by a constant.
+
+The cap is now 8, and `MIN_COL_W` drops from 260 to 150 — it stays as a floor
+but is no longer the thing deciding the count, because 260 is a guess about
+line width that no song was ever consulted about.
+
+### What stops the count running away
+
+Raising a cap alone would shatter the chart. Two new measurements hold it back.
+
+**Wrapped lines.** `scrollWidth <= availW` only ever established that the whole
+thing fits the box; nothing asked whether a column had become narrower than the
+lines it carries. When it has, a `.sb-line` flex-wraps its segments and every
+chord after the break sits above the WRONG SYLLABLE — the chart still "fits",
+and it is also wrong, which is the worst way for it to fail on stage. Six
+columns on "Teu Toque" fit the box while wrapping 21 lines.
+
+Wrapping is priced, not forbidden: `WRAP_COST = 0.5` points of font size per
+extra wrapped line. Forbidding it outright is worse than allowing it — some
+songs have one stubborn long line, and holding the count at zero for its sake
+collapsed "Teu Toque" to two columns at 10.0px where three read 12.2px. Half a
+point per line was calibrated against that song's three candidates: 2 columns at
+10.0px with no wrapping, 3 at 12.2px with three, 4 at 15.2px with twelve. It
+picks the middle one.
+
+**Column spread.** `columnSpread` groups blocks by x offset and reports the
+tallest-minus-shortest column, used to break ties between layouts of equal size.
+
+`column-fill` is now `balance` rather than `auto`. Measured, it does NOT change
+the point size the fit can reach — the element is pinned to the box height,
+which leaves the browser nothing to redistribute, and `auto` and `balance` fit
+identically at every column count on all three test songs. It is kept because it
+shares the leftover gap across the columns instead of dumping it in the last
+one, which looks better for free.
+
+### The chorus is findable
+
+A chorus is what repeats, so it is what the eye hunts for mid-song, and it used
+to look exactly like the verse above it. Three signals, none of them colour
+alone (this is read under stage lighting): a brighter, thicker gold rail, a faint
+tint, and a heavier fully-opaque label against the muted blue verse labels. It
+costs no vertical space — the tag rides in the label row that already existed.
+
+Matched on the block's BASE NAME via `isChorusBlock`, so "Chorus", "Chorus 2",
+"Final Chorus", "Refrain" and the Portuguese "Refrão" all count. The exclusions
+matter as much: a naive `/chorus/` test would light up 78 pre- and post-chorus
+blocks in this library and make the highlight meaningless. Verified against every
+base name in all 147 charts — 236 chorus blocks matched, all 78 pre/post/"to
+chorus" correctly excluded.
+
+### Near-identical sections collapse
+
+"Same God" carried FIVE Chorus blocks with identical lyrics whose chords differ
+by a handful of sus chords — 30 of the song's 87 lines spent saying the same six
+lines five times. `src/songbook/variants.js` collapses blocks with identical
+lyrics into one printed copy and annotates each differing chord inline with the
+times it applies: `5 (E) (Esus 2nd, 3rd, 4th, last time)`.
+
+Two things it gets right that a simpler version would not:
+
+Chords are matched by their ORDINAL position in the line, not their column. The
+same chord drifts a character between takes ("D" at 28 in one chorus, 27 in the
+next) purely because the transcriber typed it over a different letter; keyed by
+column those read as two different slots and the annotation becomes noise.
+
+A line whose occurrences carry DIFFERENT NUMBERS of chords is handled per line,
+not per block. An extra chord shifts every slot after it, so a slot-by-slot
+reading would rename chords that never changed and silently drop the one on the
+end. "Same God" does this twice — its last chorus opens line 4 with an added
+A/C#, a real chord change rather than a sus. Those lines get the whole
+alternative stated verbatim (`A/C# A E/G# last time`) and every other line still
+collapses, keeping most of the saving without ever describing a chord that is
+not played.
+
+Display only. `order` and the roadmap still carry all five choruses, because the
+song really does play five and the map has to say so.
+
+Library-wide: 17 charts have collapsible groups, 23 blocks and 82 lines saved,
+one group left expanded as too noisy to read collapsed.
+
+### The chorus is repeated on every page
+
+When a song paginates, ALL distinct choruses are repeated onto every page —
+mid-service the leader can go back to any of them, and a page carrying only one
+is a page where the wrong chorus is on screen. Repeat copies are separate DOM
+nodes hidden unless their page needs them, marked with a dashed rail and a quiet
+"repeat" chip, and they never appear on a song that fits one page. Their height
+is reserved before packing, so adding the repeat cannot overflow a page that was
+measured without it. The roadmap is untouched: a repeat has no position of its
+own.
+
+### Pagination is last resort
+
+A page turn mid-song is disruptive, so the only thing that earns one is a song
+that will not fit at the minimum readable size, after variants are collapsed,
+every column count is tried and the type is taken to the floor.
+
+Two bugs had to be fixed to make that safe. The page budget was computed with
+`maxColsFor(availW)` — up to 8 columns — while each page is then laid out by
+`bestFit`, which may choose 3; a page then holds nearly three times what it can
+show and renders CLIPPED. Both now use `MAX_COLS_FIT`. And the fit test itself is
+asked at the old three-column ceiling: the extra columns are a bonus for a chart
+that already fits, never a way to cram in one that does not.
+
+**Whole-library audit, all 147 charts, 1024x768: ONE paginates** — "Há Momentos
+/ Envia a Tua Unção / Com Muito Louvor", at 3 pages and 15.97px against the
+baseline's 2 pages at 10.66px. Portrait: zero. Baseline paginated two.
+
+### Verified by actually running it
+
+- `npx vite build` passes.
+- **Font size, "Teu Toque", 1024x768: 11.59px -> 12.22px**, and wrapped lines
+  went DOWN from 4 to 3 — better on both axes. Columns 321px -> 233px against a
+  312px -> 223px longest line, so per-column slack stays ~10px throughout.
+- **At 2048x1536: 25.19px -> 28px** (the maximum), 3 columns -> 4, columns
+  648px -> 472px, imbalance 32% -> 22.1%.
+- **"Ele é Deus" and "Quem é Como Nosso Deus" are unchanged** at 13.63px and
+  18.94px. Both were already at their wrap-constrained optimum; four columns on
+  "Ele é Deus" would read 16.28px while wrapping its lines, so three is correct.
+- **Column balance**: portrait imbalance is 1.7% and 8% on those two songs;
+  landscape "Ele é Deus" is 48.6%, which is structural — its blocks are two
+  298px bridges and a 250px verse against 611px columns, and with
+  `break-inside: avoid` no packing of those into three columns is even.
+- **No block breaks across a column, nothing is clipped, no scrollbar** on any
+  of the 147 charts at either orientation.
+- **"Same God": 18 blocks -> 14 printed, five choruses -> one**, carrying 5
+  inline variant notes. The Chorus (2)/(3) pair is annotated ONCE as a shared
+  "2nd, 3rd, 4th, last time" rather than twice. The line-4 E/G# -> A change is
+  preserved verbatim as `A/C# A E/G# last time`, not dropped.
+- **Roadmap still shows all five choruses** (Chorus, Chorus (2)...(5)) — checked
+  on screen in the chip row.
+- **The repeat works**: "Há Momentos" over 3 pages shows all five of its
+  choruses on every page, four marked "repeat", at 15.97px with 91 gloss lines
+  intact on each.
+- **A song whose choruses differ in LYRICS keeps them separate**: tested
+  `firm-foundation`, whose "Chorus 1" and "Chorus 2" stay distinct and each pair
+  only with its own later reprise. "Há Momentos" forms no groups at all, which is
+  why all five of its choruses are repeated rather than collapsed.
+- **A one-page song adds no repeat**: "Same God" and every other unpaginated
+  chart show 0 visible repeat blocks.
+- **Glosses survive** — 34, 25, 20 and 11 ALL-CAPS lines on the Portuguese test
+  songs, and 91 per page on the repeated-chorus medley.
+- **Annotation legibility**: at "Same God"'s tightest fit the chord renders
+  9.71px gold and the note 8px in muted gold. Proportional scaling alone had put
+  the note at 5.6px, so it now has an 8px floor — subordinate, but readable.
+
+### Caveats and disagreements with the brief
+
+**The reported 300px-per-column waste does not reproduce.** Measured slack is
+9-17px per column at every viewport tested. The win came from the column count,
+not from column width, and the brief's suggested `column-width` binary search was
+not implemented because the measurements did not support the premise.
+
+**`column-fill: balance` alone buys nothing**, contrary to the brief's
+expectation that it would let the search size against a fuller box. It is
+adopted anyway for appearance, but the point-size gain attributed to it is not
+real, and the "compare shortest to tallest and try another column count" rule
+would not have helped: it is already what the spread tie-break does, and on
+"Ele é Deus" no count removes the void.
+
+**"Same God" still does not paginate, and still reads 9.25px** in landscape
+(12.06px portrait). Collapsing its five choruses removed the overflow that used
+to send it to two pages, so it now fits one screen at a size that is honestly
+too small. Baseline gave it 13.31px across two pages. Three separate attempts to
+route it back to pagination — a comfort threshold in the caller, an overflow
+signal from `bestFit`, and a forced split — each rendered the chart CLIPPED or
+blew the page count out (six pages at 8px), because pagination's budget and the
+layout's column count are computed in different places. The budget/layout
+mismatch is fixed and the medley now benefits, but forcing this one song across
+that line was not made to work safely and was reverted rather than shipped
+half-working. It is the one thing in this entry that is worse than before.
+
+**The line counts in the brief do not match the library.** The expected
+paginating songs were cited at 126/108/104 rendered lines; the charts hold 64/56
+/53 raw lines and none exceeds 100. The figures are consistent if "rendered"
+counts chord rows and gloss rows as separate lines, which roughly doubles them.
+Under either counting, only the medley paginates now.
+
+**"Essência da Adoração" and other sub-80-line songs never paginate** in the
+shipped state — they only appeared in the red-flag list during the failed
+attempts above, and are listed here so the intermediate numbers in this session
+are not mistaken for the final ones.
+
+`setStore.js`, `src/tuner/`, `src/cutcapo/` and `src/openvoicings/` are
+untouched.
