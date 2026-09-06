@@ -1658,3 +1658,84 @@ identical degrees every time, every note on the drawn neck.
   1194px-wide landscape viewport was not observed directly.
 - The intro's extra 6s are stated in prose rather than modelled as a separate
   playable variant; the loop itself is what the view steps through.
+
+## 2026-09-06 — Per-student service access in the songbook
+
+Every student was shown the same two services — English Service and Sunday 10AM
+— and none of them plays either. Bernardo plays Link and could not see it at
+all, the day before the service. Which services a student sees is a fact about
+that student, so it now lives on that student.
+
+### The change
+
+`services` joins `pin` and `instrument` on each entry in `STUDENTS`
+(`src/App.jsx`), as an array so a student can be given a second service later as
+a data edit with no code change:
+
+| Student | Instrument | Services |
+|---|---|---|
+| Bernardo | bass | Link |
+| Julia | guitar | Link |
+| Lara | keys | Link |
+| Manuela | keys | Rocket |
+| Aninha | keys | Rocket |
+
+It threads through exactly as `instrument` does: restored with the session,
+set on login, cleared on sign-out, passed to `Songbook`.
+
+`STUDENT_SERVICE_IDS` is **gone**, not kept as a fallback. Keeping it would have
+left two competing sources of truth for the same question, which is how it came
+to be wrong for everyone at once. A comment in `setStore.js` says where the
+answer lives now. The fallback for a student with no `services` field is the
+first service in `SERVICE_TYPES` — an empty picker would be a dead end.
+
+Two module-level helpers, `servicesFor` and `landingServiceId`, are the single
+source of truth: the chips render from the first and the landing service is
+chosen by the second, so a student cannot be shown, or land on, a service that
+is not theirs. The landing service is whichever of their services comes soonest,
+which for one service is simply that service. Previously it was hardcoded to
+English Service, which no student can now reach.
+
+Service access is per-student; everything else stays per-instrument. Lara and
+Manuela both play keys and see different services, and Lara's tuner is still
+gated off by instrument — the two facts never touch.
+
+PIN values, the `c5Log` key and the teacher settings screen are untouched, as
+are `SERVICE_TYPES` day flags.
+
+### Verified by actually running it
+
+Every student was signed in through the **real login flow** — tapping their name
+and entering their PIN on the keypad — not by injecting a session.
+
+1. `npx vite build` passes.
+2. **Bernardo (2847)**: one chip, "Sun, Sep 6 · Link". Defaults to a **Sunday**,
+   and the set loads with exactly the four expected songs — Phenomena (DA DA),
+   Estações, A Ele A Glória, Holy Forever (Santo Pra Sempre).
+3. All four open a real chart (7, 7, 4 and 5 blocks; keys F#, C, G, G). None
+   flagged "no chart", and the header reads "4 songs, all charts loaded".
+4. **Manuela (6208)**: one chip, "Sat, Sep 12 · Rocket". Rocket only, defaulting
+   to a **Saturday**. See the caveat below about that set being empty.
+5. **Aninha (3175)** matches Manuela exactly. **Julia (5913)** and **Lara
+   (4321)** both match Bernardo, with the same four songs.
+6. No student can reach another service. On Lara's view every interactive
+   control was enumerated: Back, her single Link chip, the search box and four
+   key buttons — **no service select, no date input, and no control anywhere
+   naming another service**. A stale cached Rocket set left in localStorage by
+   an earlier session is unreachable because nothing can select it.
+7. **Teacher still sees all eight** services plus the date picker.
+8. Charts re-checked: font 16px, bar 44px, no sideways scroll.
+
+Also checked, beyond the list: Lara is a keys student on Link — her service list
+is right **and** her tuner is still gated off by instrument, confirming the two
+gates stay independent.
+
+### Caveat
+
+**Manuela and Aninha's Rocket set is empty, and that is upstream data, not this
+change.** Planning Center returns `found: true` with `songs: []` for Rocket on
+2026-09-12 (and 09-26; 09-05 and 09-19 have no plan at all) — confirmed by
+querying the API directly from Manuela's own signed-in session, with no error
+banner in the view. The plan exists and loads; no songs have been added to it
+yet. Bernardo's Link set on the same code loads four songs, which is what shows
+the difference is in the data rather than the gating.

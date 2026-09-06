@@ -22,7 +22,13 @@ export const SERVICE_TYPES = [
   { id: "1162055", name: "Culto Fe", day: 3 },          // Wednesday (2026-09-09, 09-16)
   { id: "1259513", name: "Culto Hope", day: 2 },        // Tuesday   (2026-09-08, 09-15)
 ];
-export const STUDENT_SERVICE_IDS = ["1707498", "1162648"];
+// NOTE: there is deliberately no shared student service list here any more.
+// Which services a student sees is a fact about that student, so it lives on
+// their entry in STUDENTS (src/App.jsx) as `services` and is threaded into the
+// songbook the same way `instrument` is. A module-level list here was wrong for
+// every student at once — none of them played the two services it named — and
+// keeping it alongside the per-student field would leave two competing sources
+// of truth for the same question.
 
 const pad = (n) => String(n).padStart(2, "0");
 export const isoDate = (d) => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());

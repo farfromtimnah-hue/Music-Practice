@@ -14,12 +14,22 @@ const TEACHER_PIN = "9999";
 // ============================================================
 // HARDCODED STUDENTS
 // ============================================================
+// `services` lists the Planning Center service type ids a student actually
+// plays, and is the ONLY source of truth for which sets they can reach. It is an
+// array so a student can be given a second service later as a data edit, with no
+// code change.
+//
+// Service access and INSTRUMENT are separate facts and are deliberately not
+// mixed: Lara and Manuela both play keys but play different services, and a
+// student's tuner gating has nothing to do with which sets they see.
+//
+// Ids: 1635885 = Link (Sunday), 1242401 = Rocket (Saturday).
 const STUDENTS = {
-  Bernardo: { pin: "2847", instrument: "bass" },
-  Julia:    { pin: "5913", instrument: "guitar" },
-  Lara:     { pin: "4321", instrument: "keys" },
-  Manuela:  { pin: "6208", instrument: "keys" },
-  Aninha:   { pin: "3175", instrument: "keys" },
+  Bernardo: { pin: "2847", instrument: "bass",   services: ["1635885"] },
+  Julia:    { pin: "5913", instrument: "guitar", services: ["1635885"] },
+  Lara:     { pin: "4321", instrument: "keys",   services: ["1635885"] },
+  Manuela:  { pin: "6208", instrument: "keys",   services: ["1242401"] },
+  Aninha:   { pin: "3175", instrument: "keys",   services: ["1242401"] },
 };
 
 // ============================================================
@@ -1065,6 +1075,10 @@ const [isTeacher, setIsTeacher]       = useState(bootTeacher);
 const [studentName, setStudentName]   = useState(() => (boot && !bootTeacher ? boot.name : ""));
 const [studentInstrument, setStudentInstrument] = useState(() =>
   (boot && !bootTeacher && STUDENTS[boot.name] ? STUDENTS[boot.name].instrument : ""));
+// The services this student plays, restored with the session the same way the
+// instrument is, so a reload cannot drop them back to somebody else's list.
+const [studentServices, setStudentServices] = useState(() =>
+  (boot && !bootTeacher && STUDENTS[boot.name] ? (STUDENTS[boot.name].services || []) : []));
 // A restored student keeps the style they already picked; without this the
 // style picker would reappear on every launch, which is a step, not a saving.
 const [learningStyle, setLearningStyle] = useState(() => {
@@ -1156,7 +1170,7 @@ return ()=>{evts.forEach(e=>window.removeEventListener(e,resetTimer));if(timer.c
 const signOut = () => {
 clearSession();
 setIsTeacher(false);
-setStudentName(""); setStudentInstrument(""); setLearningStyle(null);
+setStudentName(""); setStudentInstrument(""); setStudentServices([]); setLearningStyle(null);
 setLockedKey(null);
 setSelectedLoginName(""); setPin(""); setPinError(false);
 setPendingRoute(null);
@@ -1192,6 +1206,7 @@ if (student && next===student.pin) {
 setPin(""); setIsTeacher(false);
 setStudentName(selectedLoginName);
 setStudentInstrument(student.instrument);
+setStudentServices(student.services || []);
 writeSession(selectedLoginName);
 logActivity(selectedLoginName,{type:"login"});
 const saved=localStorage.getItem(`style_${selectedLoginName}`);
@@ -1562,7 +1577,7 @@ if (screen==="tuner") {
 // open chart hold off the inactivity timeout while it is on a music stand.
 if (screen==="songbook") {
   return (<><style>{S}</style>
-    <Songbook isTeacher={isTeacher} instrument={isTeacher ? "guitar" : studentInstrument} onKeepAlive={resetTimer} onBack={()=>setScreen(isTeacher?"teacherHome":"home")}/>
+    <Songbook isTeacher={isTeacher} instrument={isTeacher ? "guitar" : studentInstrument} services={studentServices} onKeepAlive={resetTimer} onBack={()=>setScreen(isTeacher?"teacherHome":"home")}/>
   </>);
 }
 

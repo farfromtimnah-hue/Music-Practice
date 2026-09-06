@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } fr
 import library from "./library.json";
 import { buildSearchIndex, search } from "./search.js";
 import { matchSetItem, pickChart } from "./match.js";
-import { SERVICE_TYPES, STUDENT_SERVICE_IDS, defaultDateFor, readCachedSet, fetchSet, sameSongs } from "./setStore.js";
+import { SERVICE_TYPES, defaultDateFor, readCachedSet, fetchSet, sameSongs } from "./setStore.js";
 import { toNashville, keyLegend, capoLabel, keyName, parseKeyName, transposedKeyName, transposeChordToken, pcToName, KEY_LIST } from "./chords.js";
 import { abbreviationsFor } from "./sections.js";
 import { readOverride, writeOverride, clearOverride, readKeyOverride, writeKeyOverride, clearKeyOverrides, migrateRelativeMinorKey, readChartKeyOverride, basisOf, basisDiffers } from "./overrideStore.js";
@@ -1742,13 +1742,32 @@ function CutCapoPopup({ token, capoSetting, isTeacher, onClose }) {
 // ============================================================
 // SONGBOOK — set list + search
 // ============================================================
-export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument }) {
-  const [serviceId, setServiceId] = useState(() => {
-    const w = defaultDateFor("1707498"); // Saturday
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    return new Date(w + "T12:00:00") >= today ? "1707498" : "1162648";
-  });
-  const [date, setDate] = useState(() => defaultDateFor("1707498"));
+// Which services this person may see, and which one to land on. Module level so
+// the two useState initialisers below can both call it on the very first render,
+// before any hook has run.
+const servicesFor = (isTeacher, services) => {
+  if (isTeacher) return SERVICE_TYPES;
+  const mine = (services || []).map(String)
+    .map((id) => SERVICE_TYPES.find((s) => s.id === id))
+    .filter(Boolean);
+  // A student with no `services` field falls back to the first service rather
+  // than an empty picker, which would be a dead end.
+  return mine.length ? mine : [SERVICE_TYPES[0]];
+};
+// The one whose next date comes soonest — with a single service, simply it.
+const landingServiceId = (isTeacher, services) => {
+  const list = servicesFor(isTeacher, services);
+  return [...list].sort((a, b) => defaultDateFor(a.id).localeCompare(defaultDateFor(b.id)))[0].id;
+};
+
+export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument, services }) {
+  // WHICH SERVICES THIS PERSON CAN SEE — the single source of truth. The chips
+  // render from it AND the landing service is chosen from it, so a student can
+  // never be shown, or land on, a service that is not theirs.
+  const visibleServices = useMemo(() => servicesFor(isTeacher, services), [isTeacher, services]);
+
+  const [serviceId, setServiceId] = useState(() => landingServiceId(isTeacher, services));
+  const [date, setDate] = useState(() => defaultDateFor(landingServiceId(isTeacher, services)));
   const [setData, setSetData] = useState(null);
   const [offline, setOffline] = useState(typeof navigator !== "undefined" && navigator.onLine === false);
   const [syncError, setSyncError] = useState(null);
@@ -2188,9 +2207,13 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
         </div>
       ) : (
         <div className="sb-chips">
-          {STUDENT_SERVICE_IDS.map((id) => { const s = SERVICE_TYPES.find((x) => x.id === id); return (
-            <button key={id} className={"sb-chip" + (serviceId === id ? " on" : "")} onClick={() => pickService(id)}>{weekdayLabel(defaultDateFor(id))} · {s.name}</button>
-          ); })}
+          {/* The student's OWN services. One service means one chip, which is
+              correct — the label is what tells them which service and which day
+              they are looking at, so it is still shown. */}
+          {visibleServices.map((s) => (
+            <button key={s.id} className={"sb-chip" + (serviceId === s.id ? " on" : "")}
+              onClick={() => pickService(s.id)}>{weekdayLabel(defaultDateFor(s.id))} · {s.name}</button>
+          ))}
         </div>
       )}
       <div className="sb-muted">{service ? service.name : ""} · {weekdayLabel(date)}</div>
