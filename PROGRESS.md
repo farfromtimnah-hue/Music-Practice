@@ -1278,3 +1278,142 @@ observed on screen with a genuinely keyless song.
 `setStore.js` gained a comment and nothing else; its caching and refresh logic
 is untouched. `src/tuner/`, `src/cutcapo/` and `src/openvoicings/` were not
 modified, and no worker route other than `/songbook/set` changed.
+
+## 2026-09-05 — Saturday fix, missing-chart flags, song leaders, cross-device end song
+
+Four changes in one pass. The chart layout was **not touched**: no change to the
+fit algorithm, FIT_MIN/FIT_MAX, column count or width, `column-fill`,
+`break-inside` or pagination. That work stays parked.
+
+### 1. Service days — Rocket corrected, Link left alone
+
+Rocket (1242401) was flagged `day: 0`, so the picker defaulted to a Sunday, the
+set came back empty, and an empty set reads as a missing set rather than a wrong
+date. Corrected to `day: 6`.
+
+**Link (1635885) was NOT changed, against the brief.** The instruction was to
+verify rather than assume, and the data disagrees with the premise: every Link
+plan from 2026-09-06 to 2026-11-08 falls on a **Sunday**, and every Rocket plan
+from 2026-09-05 to 2026-11-07 falls on a **Saturday** — checked one weekend at a
+time against the live endpoint. Setting Link to Saturday would have introduced
+exactly the empty-set bug the task set out to remove. The other six were checked
+the same way: English Service Saturday; Sunday 10AM and Sunday 6:30PM EN Sunday;
+Legacy, Culto Fé and Culto Hope have no plans in the window and keep `day: 0`,
+which nothing contradicts. **Worth a second pair of eyes** — if Link really has
+moved to Saturday and Planning Center is simply not showing it yet, the one-line
+change is `day: 6` in `setStore.js`.
+
+### 2. Songs with no chart
+
+A song Planning Center lists but the library has no chart for now renders in the
+list **in set order, holding its real position number** — greyed, dashed, tagged
+NO CHART. It is never dropped and the songs after it are never renumbered around
+the hole. Tapping it explains itself instead of opening an empty view. Swipe
+navigation skips it, but the position indicator stays honest: with a hole at
+position 2 of 4 the numbers run 1 / 4, 3 / 4, 4 / 4.
+
+A count sits above the list — "3 of 4 songs have charts", or "4 songs, all charts
+loaded" when there is nothing missing.
+
+Non-song plan items are excluded from the flag and the count. `looksLikeSong`
+rejects countdowns, videos, sermons and similar by name, so
+"Intro Worship 2026 (COUNTDOWN)" is not reported as a missing chart. The
+heuristic is deliberately conservative — anything ambiguous stays a song, because
+a false alarm is cheap and a silently omitted missing chart is not.
+
+### 3. Who is singing each song
+
+Planning Center puts the leader after a trailing " - " in the item title. The app
+already stripped it to match the chart; now it keeps it. `leaderOf` in `text.js`
+is the exact complement of `stripLeader` — it returns the tail only when
+`stripLeader` would have removed it — so **matching cannot drift**. Trailing
+whitespace is trimmed, two names arrive verbatim ("Kênia e Ricardo"), a title
+with its own " - " splits on the last one, and a tail that is a key ("Bb", "F#m")
+or a number yields nothing rather than printing a key where a name belongs.
+
+On the set list it sits under the title, muted, behind a ♦. On the chart it goes
+in the **existing key/capo row** as a bordered chip — its own weight and colour
+plus the ♦, so a name and a key can never read as one run-on string, and not
+colour alone, since this is read under stage lighting. It stays subordinate to
+the key. The row is `nowrap` with `overflow-x`, so the chip **cannot** add a
+line: measured with and without it, the bar height (44px), lyrics height
+(480.5px) and lyrics top (105.5px) are identical.
+
+A song added from the library has no Planning Center leader and shows nothing.
+
+### 4. End song, chosen on a phone and picked up by the iPad
+
+The closing song is picked from the sermon and posted to WhatsApp. The iPad is on
+a stand on stage and awkward to reach, so the choice is made on a phone and has to
+be on the iPad by the time she walks back up.
+
+An "End song" slot sits at the bottom of the list, always present, dashed and
+clearly not part of the Planning Center plan. Filling it makes it behave like any
+other song: swipe reaches it, and the indicator counts it (5 / 5). It can be
+changed or cleared, and it clears itself when the service date changes.
+
+`src/songbook/endsongStore.js` is the only songbook state that leaves the device.
+It polls on visibility change, on focus, on `online`, and on a gentle 20s
+interval. **Offline is absolute**: every network call resolves rather than
+rejects, `undefined` means "could not tell" and only an explicit `null` clears a
+local value, the local write always lands first, and a write made offline is
+queued and flushed on reconnect.
+
+Backend: `/songbook/endsong` (GET open, POST behind a shared key) lives in
+`ltc-api/worker.js` inside a **fenced block** — banner comments at both ends, no
+reference in or out, one table (`songbook_endsong`) nothing else touches — so
+lifting it into a standalone `songbook-api` Worker later is a copy-paste. The
+schema is documented as a manual migration in the existing style. Both endpoints
+degrade to a 200 with `unavailable: true` before the table exists, never a 500.
+
+### Verified by actually running it
+
+1. `npx vite build` passes. ltc-api deployed, **Version ID
+   `99a5613c-5b1d-443a-a828-2f4789a4728d`** (via `npx --yes wrangler@4.127.0`).
+2. **Charts opened in Chrome at an iPad viewport, first and last.** All four
+   English Service charts audited programmatically: 27 blocks, **0 overlaps, 0
+   overflowing blocks, no sideways scroll**, and 0 line-box collisions.
+3. Rocket defaults to **Sat 2026-09-05** and a set loads.
+4. Student chips read "Sat, Sep 5 · English Service" and "Sun, Sep 6 · Sunday
+   10AM" — both weekdays correct.
+5. A signed-in student is offered **only those two** services.
+6. Rocket 2026-09-05: GOODBYE YESTERDAY greys at **position 2 of 4**, swipe goes
+   1 → 3 → 4, indicator reads 1 / 4, 3 / 4, 4 / 4.
+7. COUNTDOWN is not reported as a missing chart.
+8. "3 of 4 songs have charts" on Rocket; "5 songs, all charts loaded" on Sunday
+   10AM — both correct by hand.
+9. English Service 2026-09-05 shows **Daniel, Nicole, Manu, Daniel**.
+10. Sunday 10AM 2026-09-06 shows **Ricardo, Liz, Kênia e Ricardo, Kênia, Dalci**;
+    COUNTDOWN shows no leader and no stray separator.
+11. The leader sits in the key/capo row; lyrics area measured **unchanged**.
+12. **Matching is provably unaffected**: 335 titles × 5 services compared against
+    the pre-change code — **0 differences** in entry, chart, cleaned title or
+    method.
+13. Both endpoints returned 200 before the migration (`unavailable: true`).
+14. **The actual use case, demonstrated**: end song set on one browser, then a
+    second browser with its local end-song storage **wiped** recovered it from
+    the server alone, untouched, and re-cached it.
+15. Swipe reaches the end song; it reads **5 / 5**.
+16. Cleared on one device, gone from the other ~2s later.
+17. **Offline**: with `fetch` hard-failing, the set rendered, a choice was made
+    and shown, a full poll cycle ran, and **zero errors** were thrown. The write
+    was observed sitting in the queue while offline and flushed on reconnect.
+18. Unauthenticated and wrong-key POSTs both return 401.
+19. `GET /songbook/set` still returns live data; the order-of-service endpoint
+    still 401s on its own auth (route intact).
+20. A different service date shows no end song.
+
+### Caveats
+
+- **Link's day is unchanged** — see above. This is the one deliberate deviation.
+- **A pre-existing long-line overflow was found and left alone.** At a 1024×647
+  viewport, "I Lift My Hands" has one lyric line that paints ~75px past its
+  column (`white-space: pre`, `overflow: visible`). Measured at the identical
+  viewport on unmodified HEAD: **75px there too** — same line, same pixels. It is
+  not a regression from this work, and fixing it means touching the parked fit
+  code, so it was not touched. Worth picking up when chart layout is unparked.
+- Legacy, Culto Fé and Culto Hope have no plans in the checked window, so their
+  Sunday flag rests on the brief rather than on observed data.
+- The order-of-service **PDF** was not exercised end to end — it needs an auth
+  token this session did not have. The fenced block shares no helper, table or
+  route with it, and its 401 shows the route still resolves.

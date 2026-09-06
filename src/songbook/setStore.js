@@ -6,7 +6,13 @@ export const API_BASE = "https://ltc-api.farfromtimnah.workers.dev";
 export const SERVICE_TYPES = [
   { id: "1707498", name: "English Service", day: 6 },
   { id: "1162648", name: "Sunday 10AM", day: 0 },
-  { id: "1242401", name: "Rocket", day: 0 },
+  // Rocket meets SATURDAY. It was flagged day 0, so the picker defaulted to a
+  // Sunday date and loaded an empty set — which reads as a missing set rather
+  // than a wrong date. Verified against Planning Center: every Rocket plan from
+  // 2026-09-05 to 2026-11-07 falls on a Saturday.
+  { id: "1242401", name: "Rocket", day: 6 },
+  // Link is SUNDAY, verified the same way (every plan 2026-09-06 .. 2026-11-08
+  // is a Sunday), so day 0 is already correct and is deliberately left alone.
   { id: "1635885", name: "Link", day: 0 },
   { id: "1401015", name: "Legacy", day: 0 },
   { id: "1213946", name: "Sunday 6:30PM EN", day: 0 },

@@ -1,5 +1,5 @@
 // Planning Center set item title -> library entry. Pure.
-import { normalize, stripLeader, parseTitle, tokens } from "./text.js";
+import { normalize, stripLeader, leaderOf, parseTitle, tokens } from "./text.js";
 
 const STOP = new Set(["a", "o", "e", "de", "do", "da", "the", "of", "in", "as", "em", "no", "na", "que", "is", "and"]);
 const significant = (s) => tokens(s).filter((t) => !STOP.has(t));
@@ -8,13 +8,16 @@ export const cleanSetTitle = (raw) => stripLeader(raw);
 
 export const matchSetItem = (rawTitle, library) => {
   const cleaned = cleanSetTitle(rawTitle);
+  // Planning Center already told us who is singing it. The strip above is
+  // unchanged — this only KEEPS what it was throwing away.
+  const leader = leaderOf(rawTitle);
   const parsed = parseTitle(cleaned);
   const candidates = [parsed.primary, ...parsed.alts].map(normalize).filter(Boolean);
   const entries = library.songs;
   // 1. exact normalized match against either language name / any alias
   for (const c of candidates) {
     const e = entries.find((s) => s.aliases.includes(c));
-    if (e) return { title: cleaned, entry: e, method: "exact" };
+    if (e) return { title: cleaned, entry: e, leader, method: "exact" };
   }
   // 2. all significant tokens of one contained in the other
   for (const c of candidates) {
@@ -26,9 +29,9 @@ export const matchSetItem = (rawTitle, library) => {
       const contains = (x, y) => x.every((t) => y.includes(t));
       return contains(ct, at) || contains(at, ct);
     }));
-    if (e) return { title: cleaned, entry: e, method: "tokens" };
+    if (e) return { title: cleaned, entry: e, leader, method: "tokens" };
   }
-  return { title: cleaned, entry: null, method: "none" };
+  return { title: cleaned, entry: null, leader, method: "none" };
 };
 
 // Which chart of an entry to open for a given service: EN services prefer the

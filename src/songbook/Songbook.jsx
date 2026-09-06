@@ -11,6 +11,7 @@ import {
   savedShapesFor, saveShapeFor, deleteSavedShape, analyseShape,
 } from "./cutcapoAdapter.js";
 import { readInserts, addInsert, removeInsert, clearInserts, resolveInsert, isInsertId } from "./insertStore.js";
+import { readEndSong, writeEndSongLocal, fetchEndSong, setEndSong as setEndSongRemote, flushEndSongQueue } from "./endsongStore.js";
 import Tuner from "../tuner/Tuner.jsx";
 import { guitarAnswerFor, chordNotesFor } from "./chordshapes.js";
 import CutCapoDiagram from "./CutCapoDiagram.jsx";
@@ -77,6 +78,23 @@ const S = `
 .sb-item.dragging{opacity:.45;}
 .sb-item.dragover{border-color:var(--gold,#f0c040);}
 .sb-item-added{font-size:11px;letter-spacing:1px;color:#81c784;border:1px solid #2e5e33;border-radius:6px;padding:2px 6px;margin-left:6px;}
+/* WHO IS SINGING IT. On the set list, quiet and secondary to the title. */
+.sb-item-leader{font-size:12px;color:#9a9ab8;}
+.sb-item-leader::before{content:'♦';font-size:8px;color:#5a5a78;margin-right:5px;vertical-align:middle;}
+/* A song Planning Center listed that has no chart here. Greyed, but it keeps
+   its real position number: the set is what it is, and a hole in it is a fact
+   she needs to see, not a row to renumber around. */
+.sb-item.nochart{opacity:.55;cursor:default;border-style:dashed;}
+.sb-item.nochart .sb-item-title{color:#c9c9dd;}
+.sb-nochart-tag{font-size:11px;letter-spacing:1px;color:#c9a24a;border:1px solid #5a4a20;border-radius:6px;padding:2px 6px;margin-left:auto;white-space:nowrap;}
+.sb-chartcount{font-size:12px;color:#8888aa;margin:2px 2px 8px;}
+/* THE END SONG — chosen on a phone mid-sermon, picked up here. Deliberately
+   unlike a Planning Center row: it is not part of the plan. */
+.sb-endsong{border-style:dashed;border-color:#3a3a58;background:#0b0b12;}
+.sb-endsong .sb-num{color:#6a6a8a;font-size:13px;letter-spacing:1px;}
+.sb-endsong-tag{font-size:11px;letter-spacing:1px;color:#8fb8d8;border:1px solid #2a4a63;border-radius:6px;padding:2px 6px;margin-left:6px;}
+.sb-endsong-empty{color:#7a7a99;font-style:italic;}
+.sb-endsong-clear{background:none;border:1px solid #2a2a40;border-radius:8px;color:#8888aa;font-family:inherit;font-size:12px;padding:4px 8px;cursor:pointer;}
 .sb-add-list{max-height:46vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-top:10px;}
 .sb-pos-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:13px;color:#8888aa;}
 /* chart */
@@ -113,6 +131,15 @@ const S = `
 .sb-tools{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;}
 /* One tight row: every pixel these take is a pixel the lyrics do not get. */
 .sb-bar{display:flex;gap:5px;align-items:center;flex-wrap:nowrap;overflow-x:auto;margin:2px 0 3px;scrollbar-width:none;}
+/* The leader, in the key/capo row. A name and a key are different KINDS of
+   fact, so this is a bordered chip in a different family and weight, never a
+   run-on with the key beside it. Not colour alone — the border and the ♦ carry
+   it under stage lighting. Subordinate to the key: smaller and dimmer, because
+   the key is what she plays from and the leader is context. Inline in a nowrap
+   row, so it takes NO vertical space from the lyrics. */
+.sb-bar-leader{flex:0 0 auto;font-size:12px;line-height:1.1;color:#9a9ab8;border:1px solid #33334d;border-radius:8px;padding:3px 8px;white-space:nowrap;}
+.sb-bar-leader b{font-weight:600;color:#c2c2da;}
+.sb-bar-leader::before{content:'♦';font-size:8px;color:#5a5a78;margin-right:5px;vertical-align:middle;}
 .sb-bar::-webkit-scrollbar{display:none;}
 .sb-bar .sb-tool{padding:3px 8px;font-size:12px;white-space:nowrap;flex:0 0 auto;}
 .sb-bar .sb-key-main{font-size:14px;padding:3px 8px;flex:0 0 auto;}
@@ -565,7 +592,32 @@ export const resolvePlanKey = (planKey, written) => {
 // ============================================================
 // CHART VIEW
 // ============================================================
-function ChartView({ entry, chartId, fromSet, setNav, planKey, onNavigate, onLoadWhole, index, serviceTypeId, onBack, onSwitchChart, prefs, setPrefs, onKeepAlive, isTeacher, instrument }) {
+// Is this plan item actually a SONG she would expect a chart for?
+//
+// The endpoint already filters to item_type 'song', but Planning Center plans
+// carry song-typed items that are not songs anyone plays from a chart: a
+// countdown, a video roll, a spoken segment. Those resolve as unmatched for
+// the same reason a real missing chart does, and calling them "no chart" would
+// cry wolf on every set and make the flag worthless.
+//
+// Conservative on purpose: an item is treated as NOT a song only when it says
+// so in the ways this church's plans actually say it. Anything ambiguous stays
+// a song, so a genuinely missing chart is never hidden — the failure this
+// guards against is a false alarm, and the failure it must never cause is a
+// silent omission.
+const NON_SONG_RE = /\b(countdown|pre[\s-]?roll|bumper|walk[\s-]?in|walk[\s-]?out|offering\s+video|announcements?|sermon|message|welcome|greeting|prayer|communion|baptism|benediction|dismissal|video|slide|loop|transition|instrumental\s+bed)\b/i;
+const looksLikeSong = (it) => {
+  const raw = String((it && it.title) || "");
+  // Planning Center's own convention: the descriptor in parentheses.
+  // "Intro Worship 2026 (COUNTDOWN)" is a countdown, not a song.
+  if (NON_SONG_RE.test(raw)) return false;
+  // A matched item is a song by definition — it found a chart.
+  if (it && it.match && it.match.entry) return true;
+  // Nothing left to go on: treat it as a song, so a real gap is never silent.
+  return true;
+};
+
+function ChartView({ entry, chartId, fromSet, setNav, planKey, leader, onNavigate, onLoadWhole, index, serviceTypeId, onBack, onSwitchChart, prefs, setPrefs, onKeepAlive, isTeacher, instrument }) {
   const chart = library.charts[chartId];
   const detected = chart.key;
   // TWO SEPARATE FACTS, deliberately kept apart.
@@ -1099,7 +1151,7 @@ function ChartView({ entry, chartId, fromSet, setNav, planKey, onNavigate, onLoa
       <div className="sb-pane-head">
         <div className="sb-headline">
           <button className="sb-back" onClick={onBack}>←</button>
-          {nav && <span className="sb-pos">{navIdx + 1} / {nav.list.length}</span>}
+          {nav && <span className="sb-pos">{(nav.showPos || navIdx + 1) + " / " + (nav.showTotal || nav.list.length)}</span>}
           <span className="sb-title">{displayTitle}</span>
           {altTitle && <span className="sb-alt">{altTitle}</span>}
           <span className="sb-meta">{chart.artist}{chart.tempo ? " · " + chart.tempo + " bpm" : ""}</span>
@@ -1109,6 +1161,13 @@ function ChartView({ entry, chartId, fromSet, setNav, planKey, onNavigate, onLoa
         {/* One tight row. Everything these controls take, the lyrics lose. */}
         <div className="sb-bar">
           <button className="sb-key-main" onClick={() => setPickKey((v) => !v)} title="Tap to change key">{keyHeader()}</button>
+          {/* WHO IS SINGING IT — Planning Center's leader for this item.
+              Inline in this row on purpose: the eye already comes here for the
+              key, and the row is nowrap/overflow-x, so the chip costs the
+              lyrics no vertical space at all. Kept visually distinct from the
+              key (own border, own weight, ♦ separator) so a name and a key can
+              never read as one string, and kept subordinate to it. */}
+          {leader && <span className="sb-bar-leader" title={"Led by " + leader}><b>{leader}</b></span>}
           {pickKey && (
             <>
               <label className="sb-capo-lbl">Play in
@@ -1685,9 +1744,49 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
   // chart PDF is a stale snapshot that never follows a transposition, so PC is
   // the authority on what key the band is actually in.
   const pcSongs = useMemo(() => items
-    .map((it) => { const e = it.match.entry; const c = e && pickChart(e, library, serviceId); return c ? { entry: e, chartId: c.id, title: it.match.title, planKey: it.key || null } : null; })
+    .map((it) => { const e = it.match.entry; const c = e && pickChart(e, library, serviceId); return c ? { entry: e, chartId: c.id, title: it.match.title, planKey: it.key || null, leader: it.match.leader || null } : null; })
     .filter(Boolean),
     [items, serviceId]);
+
+  // The leader by chartId, so a reordered running order — and a chart opened
+  // from it — still knows who is singing. Same shape and reason as
+  // planKeyByChart: an override moves songs, it does not change who leads them.
+  const leaderByChart = useMemo(() => {
+    const m = {};
+    pcSongs.forEach((sg) => { if (sg.leader) m[sg.chartId] = sg.leader; });
+    return m;
+  }, [pcSongs]);
+
+  // ---------------------------------------------------------------------
+  // THE PLAN AS PLANNING CENTER GAVE IT — every item, in sequence, each one
+  // marked with whether a chart exists for it. This is what the list renders,
+  // so a song with no chart keeps its REAL position instead of being dropped
+  // and the ones after it renumbered around the hole.
+  //
+  // The distinction that matters: a plan item that is not a song at all
+  // (a header, a media cue, "Intro Worship 2026 (COUNTDOWN)") is not a missing
+  // chart — there is nothing to be missing. Only items that look like songs
+  // are counted or flagged, so the count answers the question she is actually
+  // asking: are my students' songs loaded?
+  // ---------------------------------------------------------------------
+  const planRows = useMemo(() => items.map((it) => {
+    const e = it.match.entry;
+    const c = e && pickChart(e, library, serviceId);
+    return {
+      title: it.match.title,
+      leader: it.match.leader || null,
+      planKey: it.key || null,
+      entry: e || null,
+      chartId: c ? c.id : null,
+      isSong: looksLikeSong(it),
+    };
+  }), [items, serviceId]);
+
+  // "5 of 6 songs have charts" — counted over real songs only.
+  const chartCount = useMemo(() => {
+    const songs = planRows.filter((r) => r.isSong);
+    return { have: songs.filter((r) => r.chartId).length, total: songs.length };
+  }, [planRows]);
 
   // Plan key by chartId, so a reordered/overridden running order keeps PC's
   // key: an override moves songs around, it does not change what key PC holds.
@@ -1714,6 +1813,19 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
   // Bumped whenever a key override is written, so rows re-read localStorage.
   const [keyTick, setKeyTick] = useState(0);
 
+  // ---------------------------------------------------------------------
+  // END SONG. The closing song, chosen on a phone during the sermon and
+  // picked up here without the iPad being touched. Seeded from localStorage so
+  // it renders instantly and offline; refreshed from the server by the poll
+  // below. Keyed by service+date, so switching either shows the right one —
+  // or none — rather than carrying one service's closer into another.
+  // ---------------------------------------------------------------------
+  const [endSong, setEndSong] = useState(() => readEndSong(serviceId, date));
+  const [endPick, setEndPick] = useState(false);
+  const [endQuery, setEndQuery] = useState("");
+  // The title of a no-chart row she tapped, so it can explain itself.
+  const [noChartNote, setNoChartNote] = useState(null);
+
   useEffect(() => {
     setOverride(readOverride(serviceId, date));
     // NOTE: pcChanged is deliberately NOT reset here. It is derived below from
@@ -1728,6 +1840,79 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
     setAddQuery("");
     setDragIdx(null);
     setDragOver(null);
+    // An end song belongs to ONE service on ONE date. Re-seed from that
+    // service's own local value — which is null unless one was set for it —
+    // so a date change can never show last service's closing song.
+    setEndSong(readEndSong(serviceId, date));
+    setEndPick(false);
+    setEndQuery("");
+    setNoChartNote(null);
+  }, [serviceId, date]);
+
+  // ---------------------------------------------------------------------
+  // THE POLL. This is the whole point of the feature: the iPad is on a stand
+  // on stage and she is walking back to it with a guitar. It must already be
+  // showing the closing song, so nothing here waits for a tap.
+  //
+  // Two triggers: coming back to the tab (the common case — the screen was
+  // asleep or she was in another app), and a gentle interval while a set is
+  // open. The interval is deliberately slack: this is one small row, and a
+  // stage device on church wifi should not be chattering.
+  //
+  // OFFLINE. fetchEndSong resolves undefined on any failure, and undefined
+  // means "could not tell" — only an explicit null clears the local value. So
+  // with no network the row simply keeps whatever it had and nothing errors.
+  // The queue is flushed on the same triggers, so a choice made offline goes
+  // out as soon as there is a connection again.
+  // ---------------------------------------------------------------------
+  const END_POLL_MS = 20000;
+  useEffect(() => {
+    if (!serviceId || !date) return;
+    let dead = false;
+    const sync = async () => {
+      if (dead) return;
+      await flushEndSongQueue();
+      if (dead) return;
+      const row = await fetchEndSong(serviceId, date);
+      if (dead || row === undefined) return;   // offline / unreachable: keep what we have
+      setEndSong((prev) => {
+        const same = (!prev && !row) || (prev && row && prev.chartId === row.chartId &&
+          (prev.key || null) === (row.key || null) && prev.updatedAt === row.updatedAt);
+        if (same) return prev;                 // no churn when nothing changed
+        writeEndSongLocal(serviceId, date, row);
+        return row;
+      });
+    };
+    sync();
+    const iv = setInterval(sync, END_POLL_MS);
+    const onVis = () => { if (document.visibilityState === "visible") sync(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("online", sync);
+    window.addEventListener("focus", onVis);
+    return () => {
+      dead = true;
+      clearInterval(iv);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("online", sync);
+      window.removeEventListener("focus", onVis);
+    };
+  }, [serviceId, date]);
+
+  // Set or clear it. The local write inside setEndSong lands first, so this
+  // device updates immediately whether or not the network is there.
+  const chooseEndSong = useCallback((entry, chartId) => {
+    const chart = library.charts[chartId];
+    if (!chart) return;
+    const row = { chartId, entryId: entry.id, title: chart.names.primary, key: null, updatedAt: new Date().toISOString() };
+    setEndSong(row);
+    setEndPick(false);
+    setEndQuery("");
+    setEndSongRemote(serviceId, date, row);
+  }, [serviceId, date]);
+
+  const clearEndSong = useCallback(() => {
+    setEndSong(null);
+    setEndSongRemote(serviceId, date, null);
   }, [serviceId, date]);
 
   // A song the override references, resolved back to a live library entry.
@@ -1747,6 +1932,58 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
     if (!override) return pcSongs;
     return override.items.map(resolveItem).filter(Boolean);
   }, [override, pcSongs, resolveItem]);
+
+  // The end song is the last song of the service, so once one is chosen it is
+  // part of THE running order like any other: the swipe reaches it and the
+  // position indicator counts it. It is appended rather than stored in the
+  // override, because it is not a rehearsal decision about the plan — it is a
+  // different device's live choice, and the two must not overwrite each other.
+  const endSongRow = useMemo(() => {
+    if (!endSong || !endSong.chartId) return null;
+    const chart = library.charts[endSong.chartId];
+    if (!chart) return null;                       // an id this build does not know
+    const entry = library.songs.find((sg) => sg.charts.includes(endSong.chartId));
+    if (!entry) return null;
+    return { entry, chartId: endSong.chartId, title: endSong.title || chart.names.primary, isEnd: true, planKey: null, leader: null };
+  }, [endSong]);
+
+  // What the list renders and the swipe walks. One value, so they cannot
+  // disagree about what the set is or how long it is.
+  const runOrder = useMemo(() => (endSongRow ? [...setSongs, endSongRow] : setSongs), [setSongs, endSongRow]);
+
+  // ---------------------------------------------------------------------
+  // THE LIST, WITH ITS HOLES. Rows in the order they are actually played,
+  // each carrying the position number it really has.
+  //
+  // On Planning Center's own order, a song with no chart stays exactly where
+  // PC put it and keeps its number: dropping it, or renumbering around it,
+  // would tell her the set is complete when it is not. Once she has taken the
+  // order over with an override, the running order is hers and a row with
+  // nothing to open has no place in it — so the holes appear only while the
+  // list is still PC's.
+  //
+  // Position numbering counts songs only. A countdown is not song 1.
+  // ---------------------------------------------------------------------
+  const displayRows = useMemo(() => {
+    const rows = [];
+    let n = 0;
+    if (!override) {
+      planRows.forEach((r, i) => {
+        if (!r.isSong && !r.chartId) return;               // not a song: not part of the count at all
+        n += 1;
+        if (r.chartId) {
+          const sg = setSongs.find((x) => x.chartId === r.chartId && x.entry === r.entry);
+          rows.push({ kind: "song", pos: n, sg: sg || { entry: r.entry, chartId: r.chartId, title: r.title, planKey: r.planKey, leader: r.leader }, key: "p" + i });
+        } else {
+          rows.push({ kind: "nochart", pos: n, title: r.title, leader: r.leader, key: "n" + i });
+        }
+      });
+    } else {
+      setSongs.forEach((sg, i) => { n += 1; rows.push({ kind: "song", pos: n, sg, key: "o" + i }); });
+    }
+    if (endSongRow) rows.push({ kind: "song", pos: n + 1, sg: endSongRow, isEnd: true, key: "end" });
+    return rows;
+  }, [override, planRows, setSongs, endSongRow]);
 
   // Did Planning Center change under an active override? Compared against the
   // basis the override was BUILT on, never against the previous render, so a
@@ -1819,6 +2056,7 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
   }, [setSongs, keyTick]);
 
   const addResults = useMemo(() => (addQuery.trim().length >= 2 ? search(index, addQuery).slice(0, 40) : []), [index, addQuery]);
+  const endResults = useMemo(() => (endQuery.trim().length >= 2 ? search(index, endQuery).slice(0, 40) : []), [index, endQuery]);
 
   const setKeyForChart = useCallback((chartId, name) => {
     writeKeyOverride(chartId, name);
@@ -1837,23 +2075,40 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
    * its other language still lands in the right slot.
    */
   const loadWholeSong = useCallback((entry, chartId) => {
-    const onSet = setSongs.some((s) => s.entry === entry);
+    const onSet = runOrder.some((s) => s.entry === entry);
     setOpen({ entry, chartId, fromSet: onSet });
-  }, [setSongs]);
+  }, [runOrder]);
 
   if (open) {
     // Position is found by entry, so switching language/version inside a song
     // keeps the same slot in the set.
-    const navIndex = open.fromSet ? setSongs.findIndex((s) => s.entry === open.entry) : -1;
-    const setNav = navIndex >= 0 ? { list: setSongs, index: navIndex } : null;
+    // The END SONG is located by chartId, not by entry: it is appended after
+    // the plan, so a song that is both in the plan and chosen as the closer
+    // would otherwise always resolve to its first slot and the swipe could
+    // never reach the last one.
+    const navIndex = open.fromSet
+      ? (open.isEnd
+        ? runOrder.findIndex((s) => s.isEnd && s.chartId === open.chartId)
+        : runOrder.findIndex((s) => s.entry === open.entry))
+      : -1;
+    // The indicator must stay HONEST about the set: navigation skips songs
+    // with no chart, but the set is still as long as it is. So the list the
+    // swipe walks is the openable songs, while the numbers shown come from the
+    // real running order — "2 of 4", not "2 of 3", when song 2 of 4 is open
+    // and one of the four cannot be opened.
+    const navRow = navIndex >= 0 ? runOrder[navIndex] : null;
+    const truePos = navRow ? (displayRows.find((r) => r.kind === "song" && r.sg === navRow) || {}).pos : null;
+    const setNav = navIndex >= 0
+      ? { list: runOrder, index: navIndex, showPos: truePos || navIndex + 1, showTotal: displayRows.length }
+      : null;
     return (
       <><style>{S}</style><div className="sb sb-fixed">
         {/* planKey is looked up by chartId, not by the row that was tapped, so
             swiping through the set and switching charts inside a song both keep
             Planning Center's key. A song opened from SEARCH has no plan context
             and gets null — it keeps using the chart's own key, as before. */}
-        <ChartView entry={open.entry} chartId={open.chartId} fromSet={open.fromSet} setNav={setNav} planKey={open.fromSet ? (planKeyByChart[open.chartId] || null) : null} index={index} serviceTypeId={serviceId} prefs={prefs} setPrefs={setPrefs} onKeepAlive={onKeepAlive} isTeacher={isTeacher} instrument={instrument}
-          onNavigate={(t) => setOpen({ entry: t.entry, chartId: t.chartId, fromSet: true })}
+        <ChartView entry={open.entry} chartId={open.chartId} fromSet={open.fromSet} setNav={setNav} planKey={open.fromSet ? (planKeyByChart[open.chartId] || null) : null} leader={open.fromSet && !open.isEnd ? (leaderByChart[open.chartId] || null) : null} index={index} serviceTypeId={serviceId} prefs={prefs} setPrefs={setPrefs} onKeepAlive={onKeepAlive} isTeacher={isTeacher} instrument={instrument}
+          onNavigate={(t) => setOpen({ entry: t.entry, chartId: t.chartId, fromSet: true, isEnd: !!t.isEnd })}
           onLoadWhole={loadWholeSong}
           onBack={() => setOpen(null)} onSwitchChart={(id) => setOpen({ ...open, chartId: id })} />
       </div></>
@@ -1945,9 +2200,38 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
           {loading && !setData && <div className="sb-empty">Loading this week's set…</div>}
           {!loading && setData && !setData.found && <div className="sb-empty">No plan in Planning Center for this service on {weekdayLabel(date)}.</div>}
           {!loading && !setData && disconnected && <div className="sb-empty">Nothing cached for this service yet. Search still works across the whole library.</div>}
-          {/* THE running order — setSongs, so the list and the swipe navigation
-              can never disagree about what order the set is in. */}
-          {setSongs.map((sg, i) => {
+          {/* How many of today's songs she can actually open. The question she
+              is really asking before a service: are my students' songs loaded?
+              Counted over real songs only, so a countdown never drags it down. */}
+          {chartCount.total > 0 && (
+            <div className="sb-chartcount">
+              {chartCount.have === chartCount.total
+                ? chartCount.total + (chartCount.total === 1 ? " song, chart loaded" : " songs, all charts loaded")
+                : chartCount.have + " of " + chartCount.total + " songs have charts"}
+            </div>
+          )}
+          {/* THE running order — displayRows, so the list and the swipe
+              navigation can never disagree about what order the set is in, and
+              a song with no chart keeps the position it really has. */}
+          {displayRows.map((row) => {
+            // A song Planning Center listed that has no chart here. It stays in
+            // set order with its real number — never dropped, never renumbered
+            // around — and does nothing when tapped, because there is no chart
+            // to open and an empty chart view is worse than an honest one.
+            if (row.kind === "nochart") return (
+              <div className="sb-item nochart" key={row.key}
+                title="Planning Center lists this song, but there is no chart for it in the library yet."
+                onClick={() => setNoChartNote(row.title)}>
+                <span className="sb-num">{row.pos}</span>
+                <div style={{ flex: 1 }}>
+                  <div className="sb-item-title">{row.title}</div>
+                  {row.leader && <div className="sb-item-sub sb-item-leader">{row.leader}</div>}
+                </div>
+                <span className="sb-nochart-tag">NO CHART</span>
+              </div>
+            );
+            const sg = row.sg;
+            const i = row.pos - 1;
             const chart = library.charts[sg.chartId];
             const ovKey = (void keyTick, readKeyOverride(sg.chartId));
             // With no playing-key override the row shows the chart's own key —
@@ -1961,19 +2245,31 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
             const rowPlan = resolvePlanKey(sg.planKey, rowWritten);
             const shownKey = ovKey || (rowPlan ? keyName({ ...rowPlan, mode: rowWritten ? rowWritten.mode : rowPlan.mode }) : null) || ownKey;
             const alts = [sg.entry.pt, sg.entry.en].filter((n) => n && n !== sg.title).join(" · ");
+            // Reorder acts on setSongs, so it uses that list's own index. The
+            // two only differ where holes exist, and holes only exist on PC's
+            // order — which is exactly when reordering is off.
+            const oi = setSongs.indexOf(sg);
+            const isEnd = !!row.isEnd;
             return (
-              <div key={sg.chartId + ":" + i}
-                className={"sb-item" + (dragIdx === i ? " dragging" : "") + (dragOver === i ? " dragover" : "")}
-                draggable={reordering}
-                onDragStart={reordering ? () => setDragIdx(i) : undefined}
-                onDragOver={reordering ? (ev) => { ev.preventDefault(); setDragOver(i); } : undefined}
-                onDrop={reordering ? (ev) => { ev.preventDefault(); if (dragIdx != null) moveSong(dragIdx, i); setDragIdx(null); setDragOver(null); } : undefined}
-                onDragEnd={reordering ? () => { setDragIdx(null); setDragOver(null); } : undefined}>
-                <span className="sb-num">{i + 1}</span>
-                <div style={{ flex: 1, cursor: reordering ? "default" : "pointer" }}
-                  onClick={() => { if (!reordering) setOpen({ entry: sg.entry, chartId: sg.chartId, fromSet: true }); }}>
-                  <div className="sb-item-title">{sg.title}{sg.added && <span className="sb-item-added">ADDED</span>}</div>
-                  <div className="sb-item-sub">{alts}</div>
+              <div key={row.key}
+                className={"sb-item" + (isEnd ? " sb-endsong" : "") + (dragIdx === oi ? " dragging" : "") + (dragOver === oi ? " dragover" : "")}
+                draggable={reordering && !isEnd}
+                onDragStart={reordering && !isEnd ? () => setDragIdx(oi) : undefined}
+                onDragOver={reordering && !isEnd ? (ev) => { ev.preventDefault(); setDragOver(oi); } : undefined}
+                onDrop={reordering && !isEnd ? (ev) => { ev.preventDefault(); if (dragIdx != null) moveSong(dragIdx, oi); setDragIdx(null); setDragOver(null); } : undefined}
+                onDragEnd={reordering && !isEnd ? () => { setDragIdx(null); setDragOver(null); } : undefined}>
+                <span className="sb-num">{row.pos}</span>
+                <div style={{ flex: 1, cursor: reordering && !isEnd ? "default" : "pointer" }}
+                  onClick={() => { if (!reordering || isEnd) setOpen({ entry: sg.entry, chartId: sg.chartId, fromSet: true, isEnd }); }}>
+                  <div className="sb-item-title">{sg.title}
+                    {sg.added && <span className="sb-item-added">ADDED</span>}
+                    {isEnd && <span className="sb-endsong-tag">END SONG</span>}
+                  </div>
+                  {/* Who is singing it, quietly: secondary to the title, and
+                      never mistaken for the song's other-language name. */}
+                  {sg.leader
+                    ? <div className="sb-item-sub sb-item-leader">{sg.leader}{alts ? " · " + alts : ""}</div>
+                    : <div className="sb-item-sub">{alts}</div>}
                 </div>
 
                 {/* The key, always visible while running the set, and tappable
@@ -1984,14 +2280,17 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
                   {shownKey || "—"}
                 </button>
 
-                {reordering ? (
+                {isEnd ? (
+                  <button className="sb-endsong-clear" title="Clear the end song"
+                    onClick={(ev) => { ev.stopPropagation(); clearEndSong(); }}>Clear</button>
+                ) : reordering ? (
                   <span className="sb-row-edit">
-                    <button className="sb-move" disabled={i === 0} title="Move up"
-                      onClick={(ev) => { ev.stopPropagation(); moveSong(i, i - 1); }}>↑</button>
-                    <button className="sb-move" disabled={i === setSongs.length - 1} title="Move down"
-                      onClick={(ev) => { ev.stopPropagation(); moveSong(i, i + 1); }}>↓</button>
+                    <button className="sb-move" disabled={oi === 0} title="Move up"
+                      onClick={(ev) => { ev.stopPropagation(); moveSong(oi, oi - 1); }}>↑</button>
+                    <button className="sb-move" disabled={oi === setSongs.length - 1} title="Move down"
+                      onClick={(ev) => { ev.stopPropagation(); moveSong(oi, oi + 1); }}>↓</button>
                     <button className="sb-move rm" title="Remove from today's set"
-                      onClick={(ev) => { ev.stopPropagation(); removeSong(i); }}>✕</button>
+                      onClick={(ev) => { ev.stopPropagation(); removeSong(oi); }}>✕</button>
                   </span>
                 ) : (
                   chart && <span className="sb-item-lang">{chart.lang.toUpperCase()}</span>
@@ -2000,18 +2299,72 @@ export default function Songbook({ isTeacher, onBack, onKeepAlive, instrument })
             );
           })}
 
-          {/* Songs Planning Center listed that have no chart here. Shown only
-              on PC's own order — once she is editing, the running order is
-              hers and a song with nothing to open has no place in it. */}
-          {!override && items.filter((it) => !it.match.entry).map((it, i) => (
-            <div className="sb-item" key={"nc" + i} style={{ opacity: .6 }}>
-              <span className="sb-num">·</span>
+          {/* Songs with no chart are no longer listed down here: they are
+              rendered above, in set order, holding their real position number.
+              A hole in the middle of the set is the fact she needs to see. */}
+
+          {/* THE END SONG SLOT. Always present while a set is open, so there is
+              somewhere obvious for the closing song to land. Dashed and set
+              apart, because it is NOT part of the Planning Center plan — it is
+              chosen live, often from another device. */}
+          {(setData || endSongRow) && !endSongRow && (
+            <div className="sb-item sb-endsong" onClick={() => setEndPick(true)}>
+              <span className="sb-num">END</span>
               <div style={{ flex: 1 }}>
-                <div className="sb-item-title">{it.match.title}</div>
-                <div className="sb-item-sub" style={{ color: "#c9a24a" }}>chart not in library</div>
+                <div className="sb-item-title sb-endsong-empty">End song — tap to choose</div>
+                <div className="sb-item-sub">Picked here or from a phone; it appears on every device.</div>
               </div>
             </div>
-          ))}
+          )}
+
+          {/* Choosing the end song: the same library search as everywhere else. */}
+          {endPick && (
+            <div className="sb-modal" role="dialog" aria-modal="true" onClick={() => setEndPick(false)}>
+              <div className="sb-sheet" onClick={(ev) => ev.stopPropagation()}>
+                <div className="sb-sheet-top">
+                  <span className="sb-sheet-name">End song</span>
+                  <span className="sb-sheet-sub">the closing song for this service</span>
+                  <button className="sb-sheet-close" onClick={() => setEndPick(false)}>Close</button>
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <input type="search" autoFocus placeholder="Search the library…" value={endQuery}
+                    onChange={(ev) => setEndQuery(ev.target.value)} />
+                </div>
+                <div className="sb-add-list">
+                  {endResults.length === 0 && <div className="sb-empty">{endQuery.trim().length < 2 ? "Type to search all " + library.songs.length + " songs." : "No chart matches “" + endQuery + "”."}</div>}
+                  {endResults.map((r, i) => (
+                    <button className="sb-item" key={i} onClick={() => chooseEndSong(r.entry, r.chart.id)}>
+                      <div style={{ flex: 1 }}>
+                        <div className="sb-item-title">{r.chart.names.primary}</div>
+                        <div className="sb-item-sub">{r.chart.artist}</div>
+                      </div>
+                      <span className="sb-item-lang">{r.chart.lang.toUpperCase()}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="sb-sheet-note" style={{ marginTop: 10 }}>
+                  Chosen here or on a phone — it appears on every device showing this service. Works offline too: the choice is kept and sent when there is a connection again.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* A tapped song with no chart says why, rather than opening an
+              empty view or doing nothing at all. */}
+          {noChartNote && (
+            <div className="sb-modal" role="dialog" aria-modal="true" onClick={() => setNoChartNote(null)}>
+              <div className="sb-sheet" onClick={(ev) => ev.stopPropagation()}>
+                <div className="sb-sheet-top">
+                  <span className="sb-sheet-name">{noChartNote}</span>
+                  <span className="sb-sheet-sub">no chart yet</span>
+                  <button className="sb-sheet-close" onClick={() => setNoChartNote(null)}>Close</button>
+                </div>
+                <div className="sb-sheet-note" style={{ marginTop: 10 }}>
+                  Planning Center has this song on today's plan, but there is no chart for it in the library yet, so there is nothing to open. It keeps its place in the running order so the set still reads true.
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Key picker for one row: the key the band PLAYS it in today. Same
               vocabulary as the chart view, writing the SAME

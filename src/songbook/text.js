@@ -42,3 +42,22 @@ export const stripLeader = (title) => String(title || "").replace(/\s*-\s*[^-()]
   const tail = m.replace(/^\s*-\s*/, "").trim();
   return tail && tail.split(/\s+/).length <= 3 && !/\d/.test(tail) ? "" : m;
 }).trim();
+
+// The leader name Planning Center carries in the title, "Teu Toque - Kenia " ->
+// "Kenia". This is the EXACT complement of stripLeader: it returns the tail
+// only when stripLeader would have removed it, so a title that still matches
+// its chart can never gain a leader and vice versa. Null when there is no
+// leader, so the caller renders nothing rather than an empty label.
+export const leaderOf = (title) => {
+  const raw = String(title || "");
+  const stripped = stripLeader(raw);
+  if (!stripped || stripped === raw.trim()) return null;
+  // What stripLeader removed, minus the separator. Split on the LAST " - ",
+  // which is what the regex anchors to, so "Song - Part 2 - Ana" gives "Ana".
+  const tail = raw.trim().slice(stripped.length).replace(/^\s*-\s*/, "").trim();
+  if (!tail) return null;
+  // A tail that is a key ("Bb", "Am", "F#m") or a number is metadata, not a
+  // person: show nothing rather than printing a key where a name should be.
+  if (/^[A-G][b#]?m?$/.test(tail) || /^\d+$/.test(tail)) return null;
+  return tail;
+};
