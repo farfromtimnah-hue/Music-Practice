@@ -12,6 +12,8 @@ import {
 } from "./cutcapoAdapter.js";
 import { readInserts, addInsert, removeInsert, clearInserts, resolveInsert, isInsertId } from "./insertStore.js";
 import { readEndSong, writeEndSongLocal, fetchEndSong, setEndSong as setEndSongRemote, flushEndSongQueue } from "./endsongStore.js";
+import BassLineView from "./BassLineView.jsx";
+import { bassLinesFor } from "./basslines.js";
 import Tuner from "../tuner/Tuner.jsx";
 import { guitarAnswerFor, chordNotesFor } from "./chordshapes.js";
 import CutCapoDiagram from "./CutCapoDiagram.jsx";
@@ -163,6 +165,26 @@ const S = `
    give up space. */
 .sb-legend-i{flex:0 0 auto;font-size:15px;line-height:1.15;color:#ddd;background:#0e0e16;border:1px solid #2a2a40;border-radius:6px;padding:1px 6px;white-space:nowrap;}
 .sb-legend-i b{color:var(--gold,#f0c040);font-weight:700;}
+/* BASS LINE — the neck, the degree strip and its controls. */
+/* Wider than a normal sheet: a bass neck is a long thin thing and the frets
+   need the room. Two classes deep so it beats the .sb-sheet default that is
+   declared after this block. */
+/* Wider than a normal sheet: a bass neck is a long thin thing and the frets
+   need the room. Capped against the viewport too, so on a narrow iPad in
+   portrait the sheet can never end up wider than the screen it is on. Two
+   classes deep so it beats the .sb-sheet default declared after this block. */
+.sb-sheet.sb-bl-sheet{max-width:min(920px, 96vw);}
+.sb-bl-where{font-size:13px;color:#b9b9d4;background:#0b0b12;border:1px solid #2a2a40;border-radius:10px;padding:8px 10px;margin-top:10px;}
+.sb-bl-where b{color:#e9e9f6;}
+.sb-bl-board{margin:12px 0 6px;cursor:pointer;-webkit-tap-highlight-color:transparent;overflow-x:auto;}
+.sb-bl-strip{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0 2px;}
+.sb-bl-step{font-family:'Oswald',sans-serif;font-size:15px;color:#9a9ab8;background:#0e0e16;border:1px solid #2a2a40;border-radius:8px;padding:4px 9px;cursor:pointer;min-width:30px;}
+.sb-bl-step.slide{letter-spacing:.5px;}
+.sb-bl-step.on{color:#1a1208;background:var(--gold,#f0c040);border-color:var(--gold,#f0c040);font-weight:700;}
+.sb-bl-controls{display:flex;align-items:center;gap:10px;margin-top:10px;}
+.sb-bl-btn{flex:0 0 auto;font-family:inherit;font-size:14px;color:#ccc;background:#0e0e16;border:1px solid #2a2a40;border-radius:10px;padding:8px 14px;cursor:pointer;}
+.sb-bl-btn.primary{color:#1a1208;background:var(--gold,#f0c040);border-color:var(--gold,#f0c040);font-weight:700;margin-left:auto;}
+.sb-bl-count{font-family:'Oswald',sans-serif;font-size:13px;color:#8888aa;}
 .sb-tool{border:1px solid #2a2a40;background:#0e0e16;color:#aaa;border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;font-family:inherit;}
 .sb-tool.on{color:var(--gold,#f0c040);border-color:var(--gold,#f0c040);}
 .sb-notice{background:#0b1a2e;border:1px solid #1e3a5f;color:#cfe3ff;border-radius:10px;padding:5px 9px;font-size:12px;margin:3px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
@@ -671,6 +693,12 @@ function ChartView({ entry, chartId, fromSet, setNav, planKey, leader, onNavigat
   // song. The chart stays mounted underneath, so closing returns to exactly
   // the same song, page, scroll position, capo and key — nothing reloads.
   const [tunerOpen, setTunerOpen] = useState(false);
+  // BASS LINE. Offered only for songs that have one defined, and only to the
+  // people it is for: bass students and the teacher. Gated on the STUDENTS
+  // instrument field, exactly as the tuner above is.
+  const [bassOpen, setBassOpen] = useState(false);
+  const bassLines = useMemo(() => bassLinesFor(chartId), [chartId]);
+  const canSeeBass = !!bassLines && (isTeacher || instrument === "bass");
   const dragRef = useRef(null);
 
   useEffect(() => { migrateRelativeMinorKey(chartId, detected); setChartKeyOverride(lsGet("songbook_chartkey_" + chartId, null)); setKeyOverride(lsGet("songbook_key_" + chartId, null)); setNoticeDismissed(lsGet("songbook_notice_" + chartId, false)); setPlanNoticeDismissed(lsGet("songbook_pcnotice_" + chartId + "_" + (planKey || ""), false)); setCustomOrder(lsGet("songbook_order_" + chartId, null)); setCapoState(normalizeCapoSetting(lsGet("songbook_capo_" + chartId, null))); setInserts(readInserts(chartId)); setEditing(false); setPickKey(false); setFixChartKey(false); setTapped(null); setAddSecOpen(false); setTunerOpen(false); }, [chartId, planKey]);
@@ -1241,6 +1269,10 @@ function ChartView({ entry, chartId, fromSet, setNav, planKey, leader, onNavigat
           {instrument !== "keys" && (
             <button className={"sb-tool sb-tune" + (tunerOpen ? " on" : "")} onClick={() => setTunerOpen(true)}>🎯 Tune</button>
           )}
+          {/* Only where a line exists, and only for the bass. */}
+          {canSeeBass && (
+            <button className={"sb-tool" + (bassOpen ? " on" : "")} onClick={() => setBassOpen(true)}>🎸 Bass Line</button>
+          )}
           <button className={"sb-tool" + (editing ? " on" : "")} onClick={() => setEditing((v) => !v)}>{editing ? "Done" : "Reorder"}</button>
           {editing && <button className="sb-tool" onClick={() => setAddSecOpen(true)}>+ Add section</button>}
           {(customOrder || inserts.length > 0) && <button className="sb-tool" onClick={resetArrangement}>Reset order</button>}
@@ -1366,6 +1398,15 @@ function ChartView({ entry, chartId, fromSet, setNav, planKey, leader, onNavigat
               onBack={() => setTunerOpen(false)} />
           </div>
         </div>
+      )}
+
+      {/* BASS LINE. `key` is the resolved PLAYING key — her override, then
+          Planning Center, then the chart — the same value the header and the
+          legend read, so the degrees can never disagree with what the rest of
+          the page says the song is in. */}
+      {bassOpen && canSeeBass && (
+        <BassLineView line={bassLines[0]} playingKey={key ? keyName(key) : null}
+          songTitle={displayTitle} onClose={() => setBassOpen(false)} />
       )}
     </div>
   );

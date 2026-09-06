@@ -1560,3 +1560,101 @@ nothing.
 
 Nothing here was reasoned about rather than run; every number above was read off
 the live DOM.
+
+## 2026-09-06 — Bass Line: a repeating figure taught by scale degree
+
+A tap-through fretboard view that teaches a bass line by NUMBER. Two new files
+(`basslines.js`, `BassLineView.jsx`) plus 41 purely additive lines in
+`Songbook.jsx`. No fit machinery, no `library.json`, no build script, and
+nothing in `src/tuner/`, `src/cutcapo/` or `src/openvoicings/`.
+
+### Why degrees and not tab
+
+Tab is fret numbers, so it breaks the moment Planning Center transposes a song:
+the same frets in a new key are the wrong notes, and a student reading tab has
+no way to work out the right ones. Numbers survive a key change; fret positions
+move under them.
+
+So a line is stored as **(string, fret) in the key it was written in**, and the
+degrees are derived. Storing degrees directly would be the same mistake in
+reverse — the numbers would be right but the frets could never move.
+
+### The reading was verified before anything was built
+
+The tab converts to a musical, diatonic line in **F# and nowhere else**:
+
+```
+F#  6 6 1 7 6 4 1→3 b3 2 2 1 2 1 2   (one flat)
+G   b6 b6 7 b7 b6 3 7 b3 2 b2 b2 ... (nine flats)
+A   b5 b5 6 b6 b5 2 6 b2 1 7 7 ...   (five flats)
+```
+
+All twelve keys were checked; F# is the minimum-flats reading by a wide margin
+and the only one that makes musical sense. The chart's own detected key is F#
+major, which agrees independently.
+
+### What was built
+
+- **Bass Line button** on the chart view, shown only where a line is defined and
+  only to bass students and Teacher, gated on the STUDENTS instrument field the
+  way the tuner is.
+- **A realistic 4-string neck** matching the bass fretboard in `App.jsx`: string
+  order E A D G top to bottom, nut left, frets vertical, same wood gradient and
+  cream nut, inlays at 3/5/7 as there — extended with 9 and a double dot at 12,
+  which App.jsx's own comment names as the convention its 7-fret window never
+  reached.
+- **Only the current note is marked, with its DEGREE.** No fret number appears
+  anywhere in the view.
+- **Tap to advance.** No animation and no tempo: the source tab records pitch and
+  order but not timing, and a guessed tempo would teach the wrong feel. The view
+  says so plainly rather than inventing one.
+- **The whole degree strip** below the neck, current step highlighted, tappable
+  to jump.
+- **The slide is one gesture** — a bar from 1 to 3 with both degrees named and
+  the word "slide", never two disconnected taps.
+- **Where it applies** is stated in the view: the whole song except the
+  Pre-Chorus, and the intro's four opening 6s.
+
+The neck extends itself when a transposed line needs the room, and the octave is
+chosen so the shape always clears the nut. Checked across all twelve keys:
+identical degrees every time, every note on the drawn neck.
+
+### Verified by actually running it
+
+1. `npx vite build` passes.
+2. Button visibility, all four cases on screen: **Teacher yes, Bernardo (bass)
+   yes, Julia (guitar) no, Lara (keys) no.** Also confirmed a bass student sees
+   no button on a song with no line defined (Holy Forever).
+3. Stepped the whole line through the UI: **6 6 1 7 6 4 1→3 b3 2 2 1 2 1 2**,
+   matching exactly, and it loops back to the start. Step 7 draws two markers
+   plus the slide bar and the "slide" label; every other step draws exactly one.
+4. Fret positions hand-checked against the source tab — all 14 match, including
+   A9 = F# = degree **1**, A6 = D# = **6**, E7 = B = **4**, and the slide
+   E2→E6 = F#→A# = **1→3**.
+5. **The key change, demonstrated on screen.** Overriding F# → G: degree strip
+   byte-identical, marker moved 332px → 384px = **exactly one fret**. F# → A:
+   strip identical again, marker moved 156px = **exactly three frets**.
+6. Board conventions compared line by line against `App.jsx`: string order E A D
+   G identical, nut-left/frets-vertical identical, nut bar and colours identical,
+   markers 3/5/7 identical.
+7. Audited every text node in the SVG: `E A D G`, the degrees, and the word
+   "slide". **Zero fret numbers.**
+8. Charts re-checked after: font 16px, bar 44px, chart heights unchanged.
+9. Checked at iPad widths 768 / 834 / 1024 / 1180 — the sheet fits the viewport
+   height, the board renders fully, and there is no sideways page scroll.
+
+### Caveats
+
+- **"A Ele A Glória" reports 2 block overlaps — this is PRE-EXISTING.** Measured
+  on unmodified HEAD in a throwaway worktree at the same viewport: identical
+  count, identical block pairs (1↔2, 1↔3), identical geometry (252×271 and
+  252×61), same 439px chart height and 16px font. It belongs to the parked fit
+  machinery and was deliberately not touched.
+- **Landscape was tested by constraining the app box, not the real viewport.**
+  Chrome clamped the window to 834×653 and would not go wider, so the widest
+  genuine viewport exercised was 834px. Widths of 1024 and 1180 were exercised
+  by constraining the app's own box, and the sheet is capped at
+  `min(920px, 96vw)`, which is responsive by construction — but a true
+  1194px-wide landscape viewport was not observed directly.
+- The intro's extra 6s are stated in prose rather than modelled as a separate
+  playable variant; the loop itself is what the view steps through.
