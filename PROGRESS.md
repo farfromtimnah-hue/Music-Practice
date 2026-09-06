@@ -1500,3 +1500,63 @@ list renders empty. That is the date fix working — the app is arriving at the
 correct plan — and not a bug to chase; the songs simply have not been added in
 Planning Center. Culto Hope, on the same fix, loads a real set, which is what
 shows the difference is upstream data rather than code.
+
+## 2026-09-05 (later still) — Nashville legend enlarged to read at music-stand distance
+
+CSS only. Four declarations in `Songbook.jsx`; no JS, no markup, and nothing
+from the fit machinery — the diff contains no reference to FIT_MIN/FIT_MAX,
+column count or width, `column-fill`, `break-inside`, pagination or `--sbfs`.
+
+### The change
+
+`.sb-legend span` and `.sb-legend-i` both went **11px → 15px**. They are two
+renderings of the same reference and were moved together, deliberately, so they
+cannot drift apart. For scale, the key button beside the inline legend is 14px
+in that row (18px elsewhere), so the legend now sits just above its neighbour
+instead of being the smallest thing on the screen.
+
+The chord letters stay clearly distinct from the numbers: the gold `b` elements
+keep their colour and gain `font-weight:700`, while the surrounding text lifted
+from `#ccc` to `#ddd`. At 11px the colour alone carried the distinction; at 15px
+weight carries it too, which also means it does not depend on colour alone.
+
+### Why it costs the chart nothing
+
+Both legends live in rows whose height is set by something taller than they are.
+`.sb-bar` is `align-items:center`, `flex-wrap:nowrap`, `overflow-x:auto`, and its
+tallest child is the **Tune button at 44px** — more than double a legend chip.
+The chip grew 20px → 21.25px, entirely inside slack that already existed, so the
+row never changed height. If the legend ever did outgrow the row, the row scrolls
+sideways rather than growing, and the stacked `.sb-legend` wraps. Lyrics give up
+nothing.
+
+### Verified by actually running it
+
+1. `npx vite build` passes.
+2. Legend turned on and read at an iPad viewport in **both orientations** —
+   landscape (1080 wide) and portrait (app box constrained to 834px, iPad
+   portrait width). Legibly larger in both; in portrait the row scrolls
+   sideways as designed.
+3. **Chart area measured with the legend on, before and after — identical:**
+
+   | | before | after |
+   |---|---|---|
+   | chart height | **486.5px** | **486.5px** |
+   | chart top | 105.5px | 105.5px |
+   | bar height | 44px | 44px |
+   | header height | 100.5px | 100.5px |
+   | legend font | 11px | **15px** |
+   | legend chip height | 20px | 21.25px |
+
+4. Chart unchanged: four charts, 27 blocks, **0 overlaps, 0 overflowing blocks,
+   no sideways page scroll, font size 16px** — and per-chart heights (486.5 /
+   439) match their pre-change values.
+5. **The most crowded case, built on screen**: `Key: Bb ·set - Capo 3 (G) + cut
+   capo (fret 5)` with the leader chip (Daniel) and all seven legend chips
+   showing at once. Bar still **44px**, tallest child still the 44px Tune button
+   (not the legend), chart still 486.5px at top 105.5px, and the row reported
+   `scrollWidth > clientWidth` — it **scrolls sideways rather than growing
+   taller**, which is exactly the intended overflow behaviour.
+
+Nothing here was reasoned about rather than run; every number above was read off
+the live DOM.

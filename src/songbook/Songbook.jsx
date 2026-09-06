@@ -126,8 +126,8 @@ const S = `
 .sb-key{text-align:right;white-space:nowrap;}
 .sb-key-main{font-family:'Oswald',sans-serif;font-size:18px;color:var(--gold,#f0c040);background:none;border:1px solid #2a2a40;border-radius:10px;padding:6px 10px;cursor:pointer;}
 .sb-legend{display:flex;flex-wrap:wrap;gap:5px;justify-content:flex-end;margin-top:3px;}
-.sb-legend span{font-size:11px;color:#ccc;background:#0e0e16;border:1px solid #2a2a40;border-radius:6px;padding:2px 6px;}
-.sb-legend span b{color:var(--gold,#f0c040);}
+.sb-legend span{font-size:15px;color:#ddd;background:#0e0e16;border:1px solid #2a2a40;border-radius:6px;padding:2px 7px;}
+.sb-legend span b{color:var(--gold,#f0c040);font-weight:700;}
 .sb-tools{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0;}
 /* One tight row: every pixel these take is a pixel the lyrics do not get. */
 .sb-bar{display:flex;gap:5px;align-items:center;flex-wrap:nowrap;overflow-x:auto;margin:2px 0 3px;scrollbar-width:none;}
@@ -146,8 +146,23 @@ const S = `
 .sb-bar select{padding:3px 6px;font-size:12px;flex:0 0 auto;}
 .sb-bar .sb-capo-lbl{flex:0 0 auto;}
 .sb-bar-sp{flex:1 1 auto;}
-.sb-legend-i{flex:0 0 auto;font-size:11px;color:#ccc;background:#0e0e16;border:1px solid #2a2a40;border-radius:6px;padding:1px 5px;white-space:nowrap;}
-.sb-legend-i b{color:var(--gold,#f0c040);}
+/* THE LEGEND IS READ AT MUSIC-STAND DISTANCE. It was 11px — the smallest
+   thing on a screen whose key button beside it is 14px in this row — while
+   being the one element a musician actually looks down at mid-song. 15px sits
+   just above that neighbour and roughly a third larger than before.
+
+   IT COSTS THE CHART NOTHING. Both legends live in rows whose height is set by
+   something taller: .sb-bar is align-items:center, nowrap, overflow-x:auto, and
+   its tallest child (the Tune button, 44px) already dwarfs a legend chip at
+   20px. Growing the chip to 21.25px consumes slack that already existed, so the
+   bar height — and therefore the chart's height and top — do not move.
+   Measured on the same chart with the legend on, before and after: bar 44px and
+   chart 486.5px at top 105.5px, both ways.
+   If it ever does outgrow the row, the row scrolls sideways (overflow-x) or the
+   stacked legend wraps (flex-wrap) rather than getting taller. Lyrics never
+   give up space. */
+.sb-legend-i{flex:0 0 auto;font-size:15px;line-height:1.15;color:#ddd;background:#0e0e16;border:1px solid #2a2a40;border-radius:6px;padding:1px 6px;white-space:nowrap;}
+.sb-legend-i b{color:var(--gold,#f0c040);font-weight:700;}
 .sb-tool{border:1px solid #2a2a40;background:#0e0e16;color:#aaa;border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;font-family:inherit;}
 .sb-tool.on{color:var(--gold,#f0c040);border-color:var(--gold,#f0c040);}
 .sb-notice{background:#0b1a2e;border:1px solid #1e3a5f;color:#cfe3ff;border-radius:10px;padding:5px 9px;font-size:12px;margin:3px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
