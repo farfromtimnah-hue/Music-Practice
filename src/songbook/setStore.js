@@ -3,21 +3,24 @@
 
 export const API_BASE = "https://ltc-api.farfromtimnah.workers.dev";
 
+// `day` is the weekday the service MEETS, as JS getDay(): 0=Sun .. 6=Sat.
+// Every value here was verified against the live Planning Center endpoint by
+// querying all seven days of 2026-09-07..2026-09-13 for each service: each one
+// returns a plan on exactly one weekday, and that is the day recorded below.
+// (English Service has no plan that particular week; it is confirmed Saturday
+// from 2026-09-05 and 2026-09-26.)
 export const SERVICE_TYPES = [
-  { id: "1707498", name: "English Service", day: 6 },
-  { id: "1162648", name: "Sunday 10AM", day: 0 },
-  // Rocket meets SATURDAY. It was flagged day 0, so the picker defaulted to a
-  // Sunday date and loaded an empty set — which reads as a missing set rather
-  // than a wrong date. Verified against Planning Center: every Rocket plan from
-  // 2026-09-05 to 2026-11-07 falls on a Saturday.
-  { id: "1242401", name: "Rocket", day: 6 },
-  // Link is SUNDAY, verified the same way (every plan 2026-09-06 .. 2026-11-08
-  // is a Sunday), so day 0 is already correct and is deliberately left alone.
-  { id: "1635885", name: "Link", day: 0 },
-  { id: "1401015", name: "Legacy", day: 0 },
-  { id: "1213946", name: "Sunday 6:30PM EN", day: 0 },
-  { id: "1162055", name: "Culto Fe", day: 0 },
-  { id: "1259513", name: "Culto Hope", day: 0 },
+  { id: "1707498", name: "English Service", day: 6 },   // Saturday
+  { id: "1162648", name: "Sunday 10AM", day: 0 },       // Sunday
+  { id: "1242401", name: "Rocket", day: 6 },            // Saturday
+  { id: "1635885", name: "Link", day: 0 },              // Sunday
+  // These three do NOT meet at the weekend. They were all flagged Sunday, so
+  // the picker defaulted to a date with no plan and loaded an empty set —
+  // which reads as a missing set rather than a wrong date.
+  { id: "1401015", name: "Legacy", day: 5 },            // Friday    (2026-09-11, 09-18)
+  { id: "1213946", name: "Sunday 6:30PM EN", day: 0 },  // Sunday
+  { id: "1162055", name: "Culto Fe", day: 3 },          // Wednesday (2026-09-09, 09-16)
+  { id: "1259513", name: "Culto Hope", day: 2 },        // Tuesday   (2026-09-08, 09-15)
 ];
 export const STUDENT_SERVICE_IDS = ["1707498", "1162648"];
 
@@ -31,10 +34,30 @@ export const nextWeekend = (now = new Date()) => {
   const sun = new Date(now); sun.setDate(now.getDate() + ((7 - dow) % 7));
   return { saturday: isoDate(sat), sunday: isoDate(sun) };
 };
+// The next occurrence of a given weekday (0=Sun .. 6=Sat), today included when
+// today IS that day — the set for tonight's service must still be reachable on
+// the day itself.
+export const nextWeekday = (day, now = new Date()) => {
+  const d = new Date(now);
+  d.setDate(now.getDate() + ((day - now.getDay() + 7) % 7));
+  return isoDate(d);
+};
+
+// The date a service defaults to: the next time it actually MEETS.
+//
+// This used to ask only "is it day 6?" and send everything else to Sunday,
+// which could not express Friday, Wednesday or Tuesday — so Legacy, Culto Fé
+// and Culto Hope all defaulted to a day with no plan and loaded an empty set.
+// It now follows whatever weekday the service is flagged with, so the four
+// weekend services land exactly where they did before and the three midweek
+// ones land on their own day.
+//
+// An unknown id keeps the old fallback of the coming Sunday rather than
+// throwing: a service we cannot identify is no reason to break the picker.
 export const defaultDateFor = (serviceTypeId, now = new Date()) => {
   const st = SERVICE_TYPES.find((s) => s.id === String(serviceTypeId));
-  const w = nextWeekend(now);
-  return st && st.day === 6 ? w.saturday : w.sunday;
+  if (!st || typeof st.day !== "number") return nextWeekday(0, now);
+  return nextWeekday(st.day, now);
 };
 
 const cacheKey = (id, date) => "songbook_set_" + id + "_" + date;

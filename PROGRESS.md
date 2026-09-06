@@ -1417,3 +1417,86 @@ degrade to a 200 with `unavailable: true` before the table exists, never a 500.
 - The order-of-service **PDF** was not exercised end to end — it needs an auth
   token this session did not have. The fenced block shares no helper, table or
   route with it, and its 401 shows the route still resolves.
+
+## 2026-09-05 (later) — service weekdays corrected, defaultDateFor generalised
+
+Data-only change plus one function fix. No layout work: `git diff` contains no
+reference to the fit algorithm, FIT_MIN/FIT_MAX, column count or width,
+`column-fill`, `break-inside` or pagination, and `setStore.js` is the only file
+touched.
+
+### The days
+
+Three services were flagged Sunday and do not meet at the weekend at all, so the
+picker defaulted to a date with no plan and loaded an empty set — which reads as
+a missing set rather than a wrong date:
+
+| Service | was | now |
+|---|---|---|
+| Legacy (1401015) | Sunday | **Friday** |
+| Culto Fé (1162055) | Sunday | **Wednesday** |
+| Culto Hope (1259513) | Sunday | **Tuesday** |
+
+The other five were already right and are unchanged: English Service and Rocket
+Saturday; Link, Sunday 10AM and Sunday 6:30PM EN Sunday.
+
+Verified independently rather than taken on trust: all seven days of
+2026-09-07..2026-09-13 were queried for all eight services, and **each service
+returns a plan on exactly one weekday** — the day now recorded. That single-hit
+pattern is what makes this a verification rather than a confirmation. English
+Service has no plan that particular week and was confirmed Saturday separately
+(2026-09-05, 2026-09-26). The six dates named in the brief all returned
+`found: true`.
+
+### The function
+
+`defaultDateFor` asked only "is it day 6?" and sent everything else to Sunday,
+so it could not express Friday, Wednesday or Tuesday no matter what the data
+said. It now returns the next occurrence of whatever weekday the service is
+flagged with, via a new `nextWeekday(day, now)` helper. Today counts when today
+IS that day, so a set stays reachable on the day of the service. An unknown id
+keeps the old coming-Sunday fallback rather than throwing.
+
+`nextWeekend` is left in place — it is exported, and removing it is a separate
+decision from fixing this.
+
+### Verified by actually running it
+
+1. `npx vite build` passes.
+2. **All eight services selected in turn as Teacher in the real app.** Every one
+   lands on the correct weekday and reaches a live plan:
+
+   | Service | Date | Weekday | Result |
+   |---|---|---|---|
+   | English Service | 2026-09-05 | Saturday | 4 songs, all charts loaded |
+   | Sunday 10AM | 2026-09-06 | Sunday | 5 songs, all charts loaded |
+   | Rocket | 2026-09-05 | Saturday | 3 of 4 songs have charts |
+   | Link | 2026-09-06 | Sunday | 3 of 4 songs have charts |
+   | Legacy | 2026-09-11 | **Friday** | plan found, 0 songs (see below) |
+   | Sunday 6:30PM EN | 2026-09-06 | Sunday | 5 songs, all charts loaded |
+   | Culto Fé | 2026-09-09 | **Wednesday** | plan found, 0 songs (see below) |
+   | Culto Hope | 2026-09-08 | **Tuesday** | 3 songs, leaders shown |
+
+3. The three targets confirmed on screen: Legacy Friday 2026-09-11, Culto Fé
+   Wednesday 2026-09-09, Culto Hope Tuesday 2026-09-08 — the last loading a real
+   set (Ainda Estou de Pé, Vem Me Buscar, Sublime) with its leaders.
+4. Student chips read "Sat, Sep 5 · English Service" and "Sun, Sep 6 · Sunday
+   10AM" — correct weekdays, and still only the two services students get.
+5. Chart layout unchanged: four charts, 27 blocks, **0 overlaps, 0 overflowing
+   blocks, no sideways scroll, font size 16px**, bar height 44px.
+
+Also checked, beyond the asked-for list: `defaultDateFor` was run for all eight
+services from **every one of 14 consecutive start days** — always the right
+weekday, never a past date, always within the next 7 days — and the five weekend
+services produce **byte-identical dates to the old rule**, so this cannot have
+regressed the services that were already correct.
+
+### Caveat worth knowing
+
+**Legacy and Culto Fé now reach the right plan, but those plans have no songs in
+them yet.** Planning Center returns `found: true` with an empty song list for
+Legacy on 2026-09-11 and 09-18 and for Culto Fé on 2026-09-09 and 09-16, so the
+list renders empty. That is the date fix working — the app is arriving at the
+correct plan — and not a bug to chase; the songs simply have not been added in
+Planning Center. Culto Hope, on the same fix, loads a real set, which is what
+shows the difference is upstream data rather than code.
