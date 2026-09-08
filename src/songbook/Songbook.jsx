@@ -912,9 +912,14 @@ function ChartView({ entry, chartId, fromSet, setNav, planKey, leader, onNavigat
   // Nashville numbers are measured against the key the CHART IS WRITTEN IN,
   // always. They are independent of the capo and of the playing key: a 1 is a
   // 1 in every key, and a diatonic song can never show a b3 or a b7.
+  // Students see the number and nothing else, from the set or from search.
+  // The Nashville number is what Nicole teaches and what survives a key
+  // change; a letter beside it is a crutch that stops the number being
+  // learned. The teacher keeps the off-set letter hint.
   const chordText = (tok) => {
     if (!writtenKey) return tok;
     const n = toNashville(tok, writtenKey);
+    if (!isTeacher) return n;
     return fromSet ? n : (<>{n} <small>({fingeredToken(tok)})</small></>);
   };
 
@@ -1258,7 +1263,7 @@ function ChartView({ entry, chartId, fromSet, setNav, planKey, leader, onNavigat
           {sameLang.length > 1 && sameLang.map((c, i) => (
             <button key={c.id} className={"sb-tool" + (c.id === chartId ? " on" : "")} onClick={() => onSwitchChart(c.id)}>V{i + 1}</button>
           ))}
-          <button className={"sb-tool" + (prefs.legend ? " on" : "")} onClick={() => setPrefs({ ...prefs, legend: !prefs.legend })}>Legend</button>
+          {isTeacher && <button className={"sb-tool" + (prefs.legend ? " on" : "")} onClick={() => setPrefs({ ...prefs, legend: !prefs.legend })}>Legend</button>}
           {chart.glossCount > 0 && <button className={"sb-tool" + (prefs.gloss !== false ? " on" : "")} onClick={() => setPrefs({ ...prefs, gloss: prefs.gloss === false })}>Gloss</button>}
           {!chart.abbrevCollision && <button className={"sb-tool" + (prefs.roadmapFull ? " on" : "")} onClick={() => setPrefs({ ...prefs, roadmapFull: !prefs.roadmapFull })}>{prefs.roadmapFull ? "Full" : "Letters"}</button>}
           {/* Tuning is gated exactly like the standalone tuner route: keys
@@ -1277,8 +1282,10 @@ function ChartView({ entry, chartId, fromSet, setNav, planKey, leader, onNavigat
           {editing && <button className="sb-tool" onClick={() => setAddSecOpen(true)}>+ Add section</button>}
           {(customOrder || inserts.length > 0) && <button className="sb-tool" onClick={resetArrangement}>Reset order</button>}
           {/* The legend reads the same letters the chart prints beside the
-              numbers: the FINGERED key, capo included. */}
-          {prefs.legend && legendKey && keyLegend(legendKey).map((l) => <span key={l.degree} className="sb-legend-i"><b>{l.degree}</b>={l.name}</span>)}
+              numbers: the FINGERED key, capo included. Teacher only, and
+              gated on isTeacher FIRST so a student who already has
+              prefs.legend stored true in localStorage still gets nothing. */}
+          {isTeacher && prefs.legend && legendKey && keyLegend(legendKey).map((l) => <span key={l.degree} className="sb-legend-i"><b>{l.degree}</b>={l.name}</span>)}
           <span className="sb-bar-sp" />
         </div>
 

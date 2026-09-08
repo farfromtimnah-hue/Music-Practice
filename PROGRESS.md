@@ -1739,3 +1739,93 @@ querying the API directly from Manuela's own signed-in session, with no error
 banner in the view. The plan exists and loads; no songs have been added to it
 yet. Bernardo's Link set on the same code loads four songs, which is what shows
 the difference is in the data rather than the gating.
+
+---
+
+## Students see numbers only — no legend, no letter names
+
+The Nashville number is what Nicole teaches. A letter beside it is a crutch that
+stops the number being learned, and the number is also what survives a key
+change. So the student view now prints numbers and nothing else. Teacher keeps
+everything exactly as it was; this is a student-view change only.
+
+### What was showing letters, and what changed
+
+Three places print a letter name in the chart area. All three are now gated on
+`isTeacher`, the same flag the service picker and the cut capo already use — no
+second mechanism, and nothing gated on instrument, because this is about who is
+learning, not what they play.
+
+1. **The Legend button** — now teacher-only. Absent for a student, not disabled
+   and not hidden behind a setting they could find.
+2. **The legend strip** (`1=C 2-=Dm 3-=Em …`) — gated `isTeacher && prefs.legend`.
+   The `isTeacher` test comes FIRST on purpose: `prefs.legend` is persisted in
+   localStorage, so a student who already has it switched on must not keep
+   seeing the legend. Short-circuiting on `isTeacher` makes the stored value
+   unreachable rather than merely hiding the button that sets it.
+3. **`chordText`'s parenthetical** — the off-set letter hint,
+   `{n} <small>({fingeredToken(tok)})</small>`, which rendered for any song
+   opened from SEARCH rather than from the set. It now returns the bare number
+   for a student before `fromSet` is ever consulted, so the letter can never
+   render on either path. The teacher keeps the hint, from-set behaviour
+   included.
+
+### Grepped for a fourth place rather than assuming there were three
+
+`transposeChordToken`, `capoLabel`, `keyName(`, `pcToName`, `keyLegend`,
+`fingeredToken` and `sb-legend` were each traced to their render site. Nothing
+else prints a letter beside a chord in the chart body. Three findings worth
+recording:
+
+- **`.sb-legend` (Songbook.jsx:130) is dead CSS.** No JSX uses that class; the
+  live legend is `.sb-legend-i`. Left alone — removing it is unrelated tidying.
+- **The header key is a letter and students keep it**, by design. For a student
+  `keyHeader()` returns `capoLabel(key)` ("Key: F# - Capo 2 (E)"), which is the
+  key and the capo shape — kept per the brief along with the capo controls.
+- **The Planning Center notice names two keys in letters** ("Key C from
+  Planning Center — the chart is written in D"). It is a statement about the
+  key, in the same family as the header key that students keep, and it is not a
+  letter beside a chord. Left as it is; flagging it here because it is the one
+  remaining place a student can see a letter, and it is a one-line change to
+  suppress if that is not wanted.
+
+### Verified — run, not reasoned about
+
+1. `npx vite build` — passes.
+2. **Bernardo (2847)**, song opened in his session: no Legend button, no legend
+   strip, numbers only. Asserted in the DOM, not just read off a screenshot —
+   121 chord tokens, unique set `6- 1 4 1/3 1°/b3 2- 5 3-`, zero `<small>`
+   parentheticals, zero legend elements.
+3. **The search path in that same student session** — the path that previously
+   added the letter. Numbers only. This is the stronger of the two paths: the
+   student branch returns before `fromSet` is read, so from-set is covered by
+   the same assertion.
+4. **`prefs.legend` forced to `true` in localStorage**, reloaded, checked for
+   BOTH students. The pref was still stored as `{"legend":true,…}` while the
+   view showed zero legend elements. A stored preference does not defeat this.
+5. **Manuela (6208)** on Rocket: identical — 0 legend elements, 0 legend
+   buttons, 0 parentheticals, toolbar `Key: F# - Capo 2 (E) | Letters | Reorder`.
+6. **Teacher (9999)**, same song, both paths: Legend button present, legend
+   strip `1=F# 2-=G#m 3-=A#m 4=B 5=C# 6-=D#m 7°=F°` (7 items), and 92 off-set
+   letter hints `(D#m) (F#) (B) (F#/A#) …`. Unchanged.
+7. **Students keep** the chord popup (tapped a chord as Bernardo — it opened
+   with its chord tones), the capo controls, the roadmap chips, the gloss lines,
+   the section labels and the key in the header.
+8. **Chart renders correctly** — three columns, no overlap, font unchanged. No
+   layout code was touched: the fit algorithm, FIT_MIN/FIT_MAX, column count and
+   width, column-fill, break-inside and pagination are all untouched.
+
+Note on 2 and 5: the "Letters" button still in the student toolbar is the
+roadmap abbreviation toggle (V1/C/PC), not chord letters — unrelated control,
+same word.
+
+### Caveat
+
+**Neither student's set had an openable chart on this device**, so the set path
+was exercised through the teacher's set instead. Bernardo's Link set for
+Sun Sep 13 returned only the End-song placeholder, and all three songs in
+Manuela's Rocket set for Sat Sep 12 are marked NO CHART. Both are upstream data,
+unchanged by this work. It costs nothing here: set and search share one
+`ChartView` and differ only by the `fromSet` flag, and the student branch of
+`chordText` returns before `fromSet` is consulted, so search is the strictly
+harder case and it passes.
