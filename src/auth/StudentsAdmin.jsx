@@ -53,14 +53,13 @@ export default function StudentsAdmin({ onRosterChange }) {
   };
   const changed = () => { refresh(); if (onRosterChange) onRosterChange(); };
 
-  // A restored teacher session has no PIN in memory (it is never written to disk).
+  // PIN retired 2026-10-12. A teacher reaches this screen only via a signed-in passkey
+  // session (hasTeacherAuth() checks the token, not a PIN) — if that session expired,
+  // the fix is signing in again on the name screen, not typing a PIN here.
   if (!pinOk) return (
     <>
       <style>{css}</style>
-      <div className="sec-lbl">Teacher PIN needed to manage students</div>
-      <input className="sa-input sa-code" type="password" inputMode="numeric" maxLength={4} placeholder="••••"
-        value={pinIn} onChange={(e) => setPinIn(e.target.value.replace(/\D/g, ""))} />
-      <button className="teacher-btn" onClick={() => { setTeacherPin(pinIn); setPinIn(""); setPinOk(true); setErr(""); }}>Unlock</button>
+      <div className="sec-lbl">Your teacher sign-in expired. Go back and sign in again with Face ID / Touch ID.</div>
       <div className="sa-err">{err}</div>
     </>
   );

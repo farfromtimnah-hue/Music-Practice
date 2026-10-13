@@ -9,11 +9,6 @@ import StudentsAdmin from "./auth/StudentsAdmin.jsx";
 import { fetchRoster, signInWithPasskey, signInTeacherWithPasskey, setTeacherPin, clearTeacherPin } from "./auth/api.js";
 
 // ============================================================
-// TEACHER PIN
-// ============================================================
-const TEACHER_PIN = "9999";
-
-// ============================================================
 // STUDENTS — the roster now lives in music-practice-api (D1) and students sign
 // in with a passkey (see src/auth/). Only the Planning Center service ids stay
 // here, keyed by NAME, so the songbook keeps working until it is wired to the
@@ -1204,25 +1199,7 @@ setAuthMsg("");
 setScreen("pin");
 };
 
-// Teacher PIN entry — unchanged. Students no longer have PINs.
-const handlePin = (d) => {
-const next=pin+d; if (next.length>4) return;
-setPin(next); setPinError(false);
-if (next.length===4) {
-setTimeout(()=>{
-if (next===TEACHER_PIN) {
-setPin(""); setIsTeacher(true);
-setTeacherPin(next); // kept in memory/sessionStorage only, to authorise teacher calls to the API
-writeSession(TEACHER_ID);
-// A destination asked for before sign-in is honoured now, never dropped.
-const dest = pendingRoute; setPendingRoute(null);
-setScreen(dest || "teacherHome");
-} else { setPinError(true); setTimeout(()=>{setPin("");setPinError(false);},700); }
-},150);
-}
-};
-
-// Teacher sign-in by passkey — a second way in beside PIN 9999, same outcome.
+// Teacher sign-in by passkey — retired 2026-10-12: this is now the ONLY way in for teacher.
 const handleTeacherPasskey = async () => {
 setAuthBusy(true); setAuthMsg("");
 try {
@@ -1481,8 +1458,7 @@ if (screen!=="nameSelect" && screen!=="pin" && screen!=="timeout" && !readSessio
         <div className="name-divider-line"/>
       </div>
       <div style={{width:"100%",maxWidth:320}}>
-        <button className="teacher-btn" onClick={()=>handleNameSelect(TEACHER_ID)}>🎓 Teacher Login</button>
-<button className="teacher-btn" style={{marginTop:10}} disabled={authBusy} onClick={handleTeacherPasskey}>{authBusy?"Checking…":"🎓 Teacher — Face ID / Touch ID"}</button>
+<button className="teacher-btn" disabled={authBusy} onClick={handleTeacherPasskey}>{authBusy?"Checking…":"🎓 Teacher — Face ID / Touch ID"}</button>
 {authMsg && <div className="pin-error" style={{textAlign:"center",marginTop:8}}>{authMsg}</div>}
       </div>
     </div></>);
@@ -1516,8 +1492,7 @@ if (screen==="nameSelect") return (
 <div className="name-divider-line"/>
 </div>
 <div style={{width:"100%",maxWidth:320}}>
-<button className="teacher-btn" onClick={()=>handleNameSelect("__teacher__")}>🎓 Teacher Login</button>
-<button className="teacher-btn" style={{marginTop:10}} disabled={authBusy} onClick={handleTeacherPasskey}>{authBusy?"Checking…":"🎓 Teacher — Face ID / Touch ID"}</button>
+<button className="teacher-btn" disabled={authBusy} onClick={handleTeacherPasskey}>{authBusy?"Checking…":"🎓 Teacher — Face ID / Touch ID"}</button>
 {authMsg && <div className="pin-error" style={{textAlign:"center",marginTop:8}}>{authMsg}</div>}
 </div>
 </div></>
@@ -1530,19 +1505,10 @@ if (screen==="pin") return (
 <div className="pin-logo">♩♪♫♬</div>
 <div className="pin-sub">Circle of Fifths</div>
 </div>
-<div className={`pin-name ${selectedLoginName==="__teacher__"?"":"" }`} style={{color:selectedLoginName==="__teacher__"?"var(--teacher)":"var(--gold)"}}>
-{selectedLoginName==="__teacher__"?"Teacher":selectedLoginName}
+<div className="pin-name" style={{color:"var(--gold)"}}>
+{selectedLoginName}
 </div>
-{selectedLoginName===TEACHER_ID ? (<>
-<div className="pin-dots">{Array.from({length:4}).map((_,i)=><div key={i} className={`dot ${i<pin.length?(pinError?"error":"filled"):""}`}/>)}</div>
-<div className="pin-pad">
-{[1,2,3,4,5,6,7,8,9].map(d=><button key={d} className="pin-btn" onClick={()=>handlePin(String(d))}>{d}</button>)}
-<div/><button className="pin-btn" onClick={()=>handlePin("0")}>0</button>
-<button className="pin-btn" style={{fontSize:18,color:"var(--muted)"}} onClick={()=>setPin(p=>p.slice(0,-1))}>⌫</button>
-</div>
-<div className="pin-error">{pinError?"Incorrect PIN — try again":(authMsg||"")}</div>
-<button className="teacher-btn" disabled={authBusy} onClick={handleTeacherPasskey}>{authBusy?"Checking…":"Use Face ID / Touch ID instead"}</button>
-</>) : (() => {
+{(() => {
 const st = (roster||[]).find(x => x.name===selectedLoginName);
 return (<div style={{width:"100%",maxWidth:320,display:"flex",flexDirection:"column",gap:14}}>
 {st && !st.enrolled

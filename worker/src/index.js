@@ -56,14 +56,15 @@ const mintTeacherToken = async (env, teacherId) => {
   return `${teacherId}.${exp}.${await hmacHex(env, `teacher.${teacherId}.${exp}`)}`;
 };
 const requireTeacher = async (req, env) => {
-  const pin = req.headers.get("X-Teacher-PIN") || "";
-  if (pin && env.TEACHER_PIN && safeEqual(pin, env.TEACHER_PIN)) return;
+  // PIN retired 2026-10-12: a working teacher passkey exists, so the shared 4-digit
+  // secret is no longer accepted here. The Worker secret TEACHER_PIN is left unset/unused
+  // on purpose rather than deleted, in case it needs to be restored.
   const [id, exp, sig] = (req.headers.get("X-Teacher-Token") || "").split(".");
   if (sig && Number(exp) > Date.now() && safeEqual(sig, await hmacHex(env, `teacher.${id}.${exp}`))) {
     const t = await env.DB.prepare("SELECT 1 FROM students WHERE id = ? AND role = 'teacher' AND active = 1").bind(Number(id)).first();
     if (t) return;
   }
-  throw new HttpError(401, "Teacher PIN required");
+  throw new HttpError(401, "Teacher sign-in required");
 };
 
 // WebAuthn binds a passkey to the page's hostname (the RP ID), so it comes from the
