@@ -2,7 +2,9 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { createHash } from 'node:crypto'
 
-const BASE = '/Music-Practice/'
+// GitHub Pages serves this app from /Music-Practice/; Cloudflare Pages serves it from
+// the domain root. CF_PAGES is set automatically by Cloudflare's build environment.
+const BASE = process.env.CF_PAGES ? '/' : '/Music-Practice/'
 
 // Emits sw.js at build time with the exact list of built files, so the whole
 // app shell (and library.json, which is bundled into the JS) is precached on
