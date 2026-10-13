@@ -1,6 +1,45 @@
 # Music Practice App — Change Log
 
 ---
+
+## 2026-10-12 — Per-student passkey accounts (music-practice-api Worker)
+
+### Status: built + deployed, **Stytch TEST credentials only** — not yet pointed at Stytch live.
+The SMS code entry and passkey ceremony have **not** been run end to end; that click-through is
+still to be done by hand (steps below). Student PINs are gone; until each student is enrolled
+they cannot sign in. Teacher PIN 9999 is unchanged.
+
+### New Worker `worker/` (separate deployable, not part of the Vite build)
+- **URL:** https://music-practice-api.musicpractice.workers.dev  (workers.dev subdomain `musicpractice`, registered on the Music Practice account because `music-practice` was taken)
+- **Cloudflare account:** Music Practice `41801e5ba7550498fe9a64c5bbac3f8f`, pinned in `worker/wrangler.jsonc`
+- **D1:** `music-practice`, id `5978fd64-fb48-4b4a-9541-514c130367ce` (binding `DB`). Not the songbook DB. Migrations in `worker/migrations/`.
+- **Stytch:** Consumer project "Music Students", **TEST** env (`project-test-0031559d-…`). Public token + project id are plain vars; `STYTCH_SECRET` and `TEACHER_PIN` are Worker secrets (`wrangler secret put`). Stytch SDK config: SMS OTP + WebAuthn on, authorized domains `https://farfromtimnah-hue.github.io`, `http://localhost:5173`. **To go live:** new live project secret/token/id, re-set secret, re-enable SDK config in the live project.
+- **Deploy:** `cd worker && npm i && CLOUDFLARE_ACCOUNT_ID=41801e5ba7550498fe9a64c5bbac3f8f npx wrangler deploy`; `npm run db:migrate` for schema.
+- **CORS:** `https://farfromtimnah-hue.github.io` and `http://localhost:<any port>`. The passkey domain (RP ID) is taken from the request Origin, so a passkey made on localhost does NOT work on github.io — enroll on the origin you will use.
+
+### Endpoints
+Teacher-gated = header `X-Teacher-PIN` checked against the `TEACHER_PIN` secret.
+`GET /students` (teacher) · `POST /students` (teacher; creates row + Stytch user + SMS OTP) · `POST /students/:id/verify` (code → passkey challenge) · `POST /students/:id/passkey` · `POST /auth/passkey/start` + `POST /auth/passkey` (two steps, WebAuthn needs a challenge first) · `POST /students/:id/remove` (teacher; soft delete `active=0`).
+**Additions beyond the brief:** `GET /roster` (public: id, name, instrument, enrolled — no phone; the sign-in name picker needs it before anyone is signed in), `POST /students/:id/resend` (teacher; new code, 30s cooldown, also used to add a second device).
+
+### Data model
+`students`: id, name, instrument, phone, stytch_user_id, created_at, active — plus enrollment columns `otp_method_id`, `otp_sent_at`, `verified_at`, `passkey_ids` (so a passkey is bound to ONE student even when siblings share a parent phone / Stytch user) and `role` (`student`|`teacher`). Unique index on `name` among active rows (name is the localStorage key). The teacher/admin is a real row with `role='teacher'`: hidden from `/roster`, not removable from the UI. No songs/library tables.
+
+### Frontend
+- `src/auth/api.js` (API client + WebAuthn), `src/auth/StudentsAdmin.jsx` (roster, Add Student, Remove, Setup). Reached from Teacher → View Students.
+- `src/App.jsx`: `STUDENTS` removed; roster fetched from `/roster`; student sign-in is a "Sign in with Face ID / Touch ID" button on the old PIN screen (teacher keypad unchanged). `mp_session` now also stores `instrument`; old sessions without it are dropped. A signed-in student who is removed from the roster is signed out on next load.
+- Songbook per-student service ids moved to `SERVICES_BY_NAME` (by name) so the songbook, untouched, keeps working. New students have no services until wired. Songbook files untouched.
+- Teacher PIN is kept in memory/sessionStorage only (to authorise API calls); after a reload the Students screen asks for it again.
+
+### Verified without a human (curl / synthetic)
+Deploy; D1 schema; 401 without/with wrong PIN; CORS allow for both origins and none for others; input validation; passkey endpoints refuse a missing/unlisted Origin; Worker→Stytch calls from the edge (`authenticateStart` returns Stytch's real `no_active_webauthn_registrations`); Stytch `users.create` (201) and `register/start` return the expected options; soft-delete keeps the row. Synthetic fixtures were deleted afterwards.
+### NOT verified
+Real SMS delivery, OTP entry, passkey creation and passkey sign-in on a real device.
+
+### Known gaps
+Teacher PIN is a 4-digit shared secret guarding an endpoint that sends SMS — add rate limiting (Cloudflare rate-limit rule) before live. The Stytch session returned at sign-in is not used by any endpoint yet.
+
+---
 ## 2026-08-09 — Instrument Tuner (guitar + bass, two mic modes)
 
 ### What Was Added

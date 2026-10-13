@@ -5,6 +5,8 @@ import RichVoicingsStudio from "./pianovoicings/RichVoicingsStudio.jsx";
 import KeyboardStudio from "./keyboard/KeyboardStudio.jsx";
 import Tuner from "./tuner/Tuner.jsx";
 import Songbook from "./songbook/Songbook.jsx";
+import StudentsAdmin from "./auth/StudentsAdmin.jsx";
+import { fetchRoster, signInWithPasskey, setTeacherPin, clearTeacherPin } from "./auth/api.js";
 
 // ============================================================
 // TEACHER PIN
@@ -12,51 +14,48 @@ import Songbook from "./songbook/Songbook.jsx";
 const TEACHER_PIN = "9999";
 
 // ============================================================
-// HARDCODED STUDENTS
-// ============================================================
-// `services` lists the Planning Center service type ids a student actually
-// plays, and is the ONLY source of truth for which sets they can reach. It is an
-// array so a student can be given a second service later as a data edit, with no
-// code change.
+// STUDENTS — the roster now lives in music-practice-api (D1) and students sign
+// in with a passkey (see src/auth/). Only the Planning Center service ids stay
+// here, keyed by NAME, so the songbook keeps working until it is wired to the
+// API. A student not listed here simply has no services yet.
 //
 // Service access and INSTRUMENT are separate facts and are deliberately not
-// mixed: Lara and Manuela both play keys but play different services, and a
-// student's tuner gating has nothing to do with which sets they see.
+// mixed: Lara and Manuela both play keys but play different services.
 //
 // Ids: 1635885 = Link (Sunday), 1242401 = Rocket (Saturday).
-const STUDENTS = {
-  Bernardo: { pin: "2847", instrument: "bass",   services: ["1635885"] },
-  Julia:    { pin: "5913", instrument: "guitar", services: ["1635885"] },
-  Lara:     { pin: "4321", instrument: "keys",   services: ["1635885"] },
-  Manuela:  { pin: "6208", instrument: "keys",   services: ["1242401"] },
-  Aninha:   { pin: "3175", instrument: "keys",   services: ["1242401"] },
+const SERVICES_BY_NAME = {
+  Bernardo: ["1635885"],
+  Julia:    ["1635885"],
+  Lara:     ["1635885"],
+  Manuela:  ["1242401"],
+  Aninha:   ["1242401"],
 };
+const servicesFor = (name) => SERVICES_BY_NAME[name] || [];
 
 // ============================================================
 // SESSION — remembers WHO is signed in, so a launch is not four steps.
 //
-// Only the name and a timestamp are stored, under mp_session. The PIN is
-// never written to disk: this key says "Nicole was here", not "let anyone
-// in". The PIN screen is still the path for a fresh sign-in and after the
-// inactivity timeout, which is what keeps a shared church iPad honest.
+// Only the name, instrument and a timestamp are stored, under mp_session. No
+// secret is ever written to disk: this key says "Nicole was here", not "let
+// anyone in". The passkey / PIN screen is still the path for a fresh sign-in and
+// after the inactivity timeout, which is what keeps a shared church iPad honest.
 //
 // Deliberately its own key. style_<name> and c5Log are untouched.
 // ============================================================
 const SESSION_KEY = "mp_session";
 const TEACHER_ID = "__teacher__";
 
-/** Is this a name we still recognise? Guards against a renamed/removed student. */
-const knownLogin = (name) => name === TEACHER_ID || Object.prototype.hasOwnProperty.call(STUDENTS, name);
 
 const readSession = () => {
   try {
     const raw = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
-    if (!raw || typeof raw.name !== "string" || !knownLogin(raw.name)) return null;
+    if (!raw || typeof raw.name !== "string" || !raw.name) return null;
+    if (raw.name !== TEACHER_ID && typeof raw.instrument !== "string") return null; // pre-passkey session: sign in again
     return raw;
   } catch (e) { return null; }
 };
-const writeSession = (name) => {
-  try { localStorage.setItem(SESSION_KEY, JSON.stringify({ name, at: Date.now() })); } catch (e) { /* ignore */ }
+const writeSession = (name, instrument) => {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify({ name, instrument, at: Date.now() })); } catch (e) { /* ignore */ }
 };
 const clearSession = () => {
   try { localStorage.removeItem(SESSION_KEY); } catch (e) { /* ignore */ }
@@ -1074,11 +1073,21 @@ const [pinError, setPinError]         = useState(false);
 const [isTeacher, setIsTeacher]       = useState(bootTeacher);
 const [studentName, setStudentName]   = useState(() => (boot && !bootTeacher ? boot.name : ""));
 const [studentInstrument, setStudentInstrument] = useState(() =>
-  (boot && !bootTeacher && STUDENTS[boot.name] ? STUDENTS[boot.name].instrument : ""));
+  (boot && !bootTeacher ? boot.instrument : ""));
 // The services this student plays, restored with the session the same way the
 // instrument is, so a reload cannot drop them back to somebody else's list.
 const [studentServices, setStudentServices] = useState(() =>
-  (boot && !bootTeacher && STUDENTS[boot.name] ? (STUDENTS[boot.name].services || []) : []));
+  (boot && !bootTeacher ? servicesFor(boot.name) : []));
+// The active roster from the API (id, name, instrument, enrolled). null = not loaded yet.
+const [roster, setRoster]         = useState(null);
+const [rosterErr, setRosterErr]   = useState("");
+const [authMsg, setAuthMsg]       = useState("");
+const [authBusy, setAuthBusy]     = useState(false);
+const loadRoster = useCallback(() => {
+  fetchRoster().then((r) => { setRoster(r); setRosterErr(""); })
+    .catch((e) => setRosterErr(e.message));
+}, []);
+useEffect(() => { loadRoster(); }, [loadRoster]);
 // A restored student keeps the style they already picked; without this the
 // style picker would reappear on every launch, which is a step, not a saving.
 const [learningStyle, setLearningStyle] = useState(() => {
@@ -1168,55 +1177,70 @@ return ()=>{evts.forEach(e=>window.removeEventListener(e,resetTimer));if(timer.c
 // Sign out — forget the remembered user and hand the device back to the
 // name picker. The PIN screen is untouched: it is still how anyone gets in.
 const signOut = () => {
-clearSession();
+clearSession(); clearTeacherPin();
 setIsTeacher(false);
 setStudentName(""); setStudentInstrument(""); setStudentServices([]); setLearningStyle(null);
 setLockedKey(null);
-setSelectedLoginName(""); setPin(""); setPinError(false);
+setSelectedLoginName(""); setPin(""); setPinError(false); setAuthMsg("");
 setPendingRoute(null);
 try { window.history.replaceState(null, "", window.location.pathname + window.location.search); } catch (e) { /* ignore */ }
 setScreen("nameSelect");
 };
 
-// Login: name selected, now show PIN entry
+// A removed student must not stay signed in on an iPad that remembers them.
+useEffect(() => {
+if (!roster) return;
+const sess = readSession();
+if (sess && sess.name !== TEACHER_ID && !roster.some(s => s.name === sess.name)) signOut();
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [roster]);
+
+// Login: name selected, now show the PIN pad (teacher) or the passkey prompt (student)
 const handleNameSelect = (name) => {
 setSelectedLoginName(name);
 setPin("");
 setPinError(false);
+setAuthMsg("");
 setScreen("pin");
 };
 
-// PIN entry — works for both students and teacher
+// Teacher PIN entry — unchanged. Students no longer have PINs.
 const handlePin = (d) => {
 const next=pin+d; if (next.length>4) return;
 setPin(next); setPinError(false);
 if (next.length===4) {
 setTimeout(()=>{
-if (selectedLoginName===TEACHER_ID) {
 if (next===TEACHER_PIN) {
 setPin(""); setIsTeacher(true);
+setTeacherPin(next); // kept in memory/sessionStorage only, to authorise teacher calls to the API
 writeSession(TEACHER_ID);
 // A destination asked for before sign-in is honoured now, never dropped.
 const dest = pendingRoute; setPendingRoute(null);
 setScreen(dest || "teacherHome");
 } else { setPinError(true); setTimeout(()=>{setPin("");setPinError(false);},700); }
-} else {
-const student = STUDENTS[selectedLoginName];
-if (student && next===student.pin) {
-setPin(""); setIsTeacher(false);
-setStudentName(selectedLoginName);
+},150);
+}
+};
+
+// Student sign-in: the iPad's own Face ID / Touch ID / passcode, via the student's passkey.
+const handlePasskeySignIn = async () => {
+const student = (roster||[]).find(s => s.name===selectedLoginName);
+if (!student) { setAuthMsg("Loading the student list — try again in a moment."); return; }
+setAuthBusy(true); setAuthMsg("");
+try {
+await signInWithPasskey(student.id);
+setIsTeacher(false);
+setStudentName(student.name);
 setStudentInstrument(student.instrument);
-setStudentServices(student.services || []);
-writeSession(selectedLoginName);
-logActivity(selectedLoginName,{type:"login"});
-const saved=localStorage.getItem(`style_${selectedLoginName}`);
+setStudentServices(servicesFor(student.name));
+writeSession(student.name, student.instrument);
+logActivity(student.name,{type:"login"});
+const saved=localStorage.getItem(`style_${student.name}`);
 const dest = pendingRoute; setPendingRoute(null);
 if (saved){setLearningStyle(saved);setScreen(dest || "home");}
 else setScreen("stylePick");
-} else { setPinError(true); setTimeout(()=>{setPin("");setPinError(false);},700); }
-}
-},150);
-}
+} catch (e) { setAuthMsg(e.message || "Sign-in failed"); }
+finally { setAuthBusy(false); }
 };
 
 const handleStyle = (s) => {
@@ -1433,9 +1457,10 @@ if (screen!=="nameSelect" && screen!=="pin" && screen!=="timeout" && !readSessio
     <div className="name-screen">
       <div><div className="pin-logo">♩♪♫♬</div><div className="pin-sub">Circle of Fifths</div></div>
       <div className="name-list">
-        {Object.keys(STUDENTS).map(name => (
-          <button key={name} className="name-btn" onClick={()=>handleNameSelect(name)}>{name}</button>
+        {(roster||[]).map(st => (
+          <button key={st.id} className="name-btn" onClick={()=>handleNameSelect(st.name)}>{st.name}</button>
         ))}
+        {rosterErr && <div className="pin-error" style={{textAlign:"center"}}>{rosterErr} <button className="ghost-btn" style={{marginTop:8}} onClick={loadRoster}>Try again</button></div>}
       </div>
       <div className="name-divider">
         <div className="name-divider-line"/>
@@ -1465,9 +1490,10 @@ if (screen==="nameSelect") return (
 <div className="name-screen">
 <div><div className="pin-logo">♩♪♫♬</div><div className="pin-sub">Circle of Fifths</div></div>
 <div className="name-list">
-{Object.keys(STUDENTS).map(name => (
-<button key={name} className="name-btn" onClick={()=>handleNameSelect(name)}>{name}</button>
+{(roster||[]).map(st => (
+<button key={st.id} className="name-btn" onClick={()=>handleNameSelect(st.name)}>{st.name}</button>
 ))}
+{rosterErr && <div className="pin-error" style={{textAlign:"center"}}>{rosterErr} <button className="ghost-btn" style={{marginTop:8}} onClick={loadRoster}>Try again</button></div>}
 </div>
 <div className="name-divider">
 <div className="name-divider-line"/>
@@ -1490,6 +1516,7 @@ if (screen==="pin") return (
 <div className={`pin-name ${selectedLoginName==="__teacher__"?"":"" }`} style={{color:selectedLoginName==="__teacher__"?"var(--teacher)":"var(--gold)"}}>
 {selectedLoginName==="__teacher__"?"Teacher":selectedLoginName}
 </div>
+{selectedLoginName===TEACHER_ID ? (<>
 <div className="pin-dots">{Array.from({length:4}).map((_,i)=><div key={i} className={`dot ${i<pin.length?(pinError?"error":"filled"):""}`}/>)}</div>
 <div className="pin-pad">
 {[1,2,3,4,5,6,7,8,9].map(d=><button key={d} className="pin-btn" onClick={()=>handlePin(String(d))}>{d}</button>)}
@@ -1497,6 +1524,15 @@ if (screen==="pin") return (
 <button className="pin-btn" style={{fontSize:18,color:"var(--muted)"}} onClick={()=>setPin(p=>p.slice(0,-1))}>⌫</button>
 </div>
 <div className="pin-error">{pinError?"Incorrect PIN — try again":""}</div>
+</>) : (() => {
+const st = (roster||[]).find(x => x.name===selectedLoginName);
+return (<div style={{width:"100%",maxWidth:320,display:"flex",flexDirection:"column",gap:14}}>
+{st && !st.enrolled
+? <div className="pin-error" style={{textAlign:"center"}}>{selectedLoginName} isn't set up on this iPad yet. Ask your teacher.</div>
+: <button className="primary-btn" disabled={authBusy||!st} onClick={handlePasskeySignIn}>{authBusy?"Checking…":"Sign in with Face ID / Touch ID"}</button>}
+<div className="pin-error">{authMsg || (!st && !rosterErr ? "Loading…" : rosterErr)}</div>
+</div>);
+})()}
 <button className="ghost-btn" style={{maxWidth:320}} onClick={()=>{setPin("");setPinError(false);setScreen("nameSelect");}}>← Back</button>
 </div></>
 );
@@ -1638,20 +1674,7 @@ if (screen==="settings") return (
 <button className="ghost-btn" style={{width:"auto",padding:"6px 14px"}} onClick={()=>setScreen("teacherHome")}>← Back</button>
 <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,color:"var(--teacher)",letterSpacing:2}}>Students</div>
 </div>
-<div className="sec-lbl">Hardcoded in the app — edit App.jsx to change</div>
-{Object.entries(STUDENTS).map(([name, info]) => (
-<div key={name} className="student-row-ro">
-<div className="ro-name">{name}</div>
-<div className="ro-pin">{"•".repeat(4)}</div>
-<div className="ro-inst">{info.instrument}</div>
-</div>
-))}
-<div style={{marginTop:8,fontSize:13,color:"var(--muted)",lineHeight:1.6}}>
-To add, remove, or change a student, update the <code style={{background:"var(--surface2)",padding:"2px 6px",borderRadius:4,fontSize:12}}>STUDENTS</code> object at the top of <code style={{background:"var(--surface2)",padding:"2px 6px",borderRadius:4,fontSize:12}}>src/App.jsx</code>.
-</div>
-<div className="sec-lbl" style={{marginTop:8}}>Teacher PIN</div>
-<div style={{fontSize:13,color:"var(--muted)"}}>Set at the top of the code file — look for <code style={{background:"var(--surface2)",padding:"2px 6px",borderRadius:4,fontSize:12}}>TEACHER_PIN</code></div>
-
+<StudentsAdmin onRosterChange={loadRoster}/>
 <div className="sec-lbl" style={{marginTop:16}}>This device</div>
 <div style={{fontSize:13,color:"var(--muted)",lineHeight:1.6,marginBottom:8}}>
 This iPad stays signed in as Teacher so the songbook is one tap away. Sign out to hand it to someone else — it returns to the name picker and the next person picks their own name.

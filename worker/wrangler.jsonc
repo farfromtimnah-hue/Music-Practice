@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "music-practice-api",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // Pinned so this Worker can never resolve against another account.
+  "account_id": "41801e5ba7550498fe9a64c5bbac3f8f",
+  "observability": { "enabled": true },
+  "workers_dev": true,
+  "preview_urls": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "music-practice",
+      "database_id": "5978fd64-fb48-4b4a-9541-514c130367ce",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    // Stytch TEST project ("Music Students"). Not yet pointed at live.
+    "STYTCH_PROJECT_ID": "project-test-0031559d-9665-464d-9d83-38350ee25dfb",
+    "STYTCH_PUBLIC_TOKEN": "public-token-test-49425a3b-816b-4b4e-82d8-18712a4cb833",
+    "STYTCH_ENV": "test"
+  }
+  // Secrets (wrangler secret put): STYTCH_SECRET, TEACHER_PIN
+}
