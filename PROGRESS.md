@@ -2,6 +2,40 @@
 
 ---
 
+## 2026-10-12 — Invite links for enrollment (no student device needed at creation)
+
+### Status: built + deployed (Worker version after migration 0004). **Stytch TEST credentials still.**
+Verified by curl and a real-browser render of the invite page. **Not verified:** the SMS arriving and the
+passkey ceremony via an invite link — that needs a real phone number and a human at the biometric prompt (see output of this session).
+
+### How it works
+Teacher: Students → ＋ Add Student → **Create invite link** (nothing is texted yet) → copy / "Open in Messages" → sends the link to the parent.
+Parent opens `<app>/#/invite/<token>` on the **student's own device** → sees "Hi, <name>" → **Send code** (Worker texts the number already on file) → enters code → passkey sheet on that device → done.
+The old teacher-present path still exists ("I'm holding their device" / **SETUP HERE**), and rows get **LINK / NEW LINK** buttons (works for the teacher row too, so a teacher can get a passkey on a new device).
+
+### Token
+- 32 hex chars = 16 random bytes from `crypto.getRandomValues` (128 bits), column `students.invite_token`, unique partial index.
+- `invite_expires_at` = creation/regeneration + **72 hours** (chosen: long enough for a parent to get to it over a weekend, short enough that a stale text isn't a standing door).
+- Stored **raw, not hashed**, so the teacher can re-show/copy a live link from the roster; the token is single-purpose and expires, and is cleared on success.
+- Regenerating (`POST /students/:id/invite`) overwrites the token, so old links die. A successful passkey registration clears the token (single use). A removed (`active=0`) row's link is dead.
+- 404 unknown/removed/not-hex · 410 expired. The phone number is never returned by any invite route.
+
+### New / changed routes (worker/src/index.js)
+Public (no teacher auth, the token is the only credential and only for its own row): `GET /invite/:token` (name, instrument, role, expires_at) · `POST /invite/:token/send` (body is never read; phone comes from the row) · `POST /invite/:token/verify` · `POST /invite/:token/passkey`.
+Teacher-gated: `POST /students/:id/invite` (new link); `POST /students` accepts `mode:"invite"` (no SMS) and always returns `invite_token`/`invite_expires_at`; `GET /students` includes them.
+
+### Reused vs new
+- **Reused, now shared by id-routes and token-routes:** `sendOtp` (existing), plus three functions extracted from the old inline route bodies so there is ONE implementation: `sendCodeFlow` (cooldown + sendOtp), `verifyFlow` (otps.authenticate → registerStart), `passkeyFlow` (webauthn.register → append to this row's `passkey_ids`). `/students/:id/{resend,verify,passkey}` now call them too. `getStudent`, `registrationOptions`, `publicStudent` unchanged.
+- **New:** `newInviteToken`, `issueInvite`, `getByInvite`, migration `0004_invite.sql`, the four `/invite` routes + `/students/:id/invite`.
+- **Per-student passkey binding is intact:** `passkeyFlow` only appends the registration id to the row it was called for; `/auth/passkey` still checks `user_id` AND membership in that row's `passkey_ids` (siblings sharing a phone/Stytch user stay separate).
+- Frontend: new `src/auth/EnrollSteps.jsx` (code + done screens + shared CSS, extracted from StudentsAdmin and used by both flows), new `src/auth/Invite.jsx`, `StudentsAdmin.jsx` (create-invite form, link screen, LINK buttons), `api.js` (`invite*`, `issueInvite`, `inviteLink`, `createCredential` shared with `registerPasskey`), `App.jsx` (hash route `#/invite/<32 hex>` rendered ahead of the auth gate with no session needed; the hash-sync effect leaves it alone). Routing reuses the app's existing hash convention.
+
+### Verified (curl, synthetic row, deleted after)
+`GET /invite/:token` with zero auth → 200 {name, instrument, role, expires_at}; unknown/non-hex token → 404; the token used as X-Teacher-Token or X-Teacher-PIN on GET /students, POST /students, /resend, /invite, /remove → all 401; verify with a code before any text → 400 and body ids ignored; passkey before verify → 403; regenerate/expiry → 410 and an expired `/send` sends nothing (`otp_sent_at` stays NULL); removed row → 404. Real-browser: `#/invite/<token>` renders "Hi, <name>" + Send code with no session, no phone shown.
+Note: PIN 9999 was retired by another commit (5026cf0) while this was built, so no teacher token existed here; the synthetic row was inserted directly in D1 rather than via the teacher-gated create, and `/send` was never called on it.
+
+---
+
 ## 2026-10-12 — Per-student passkey accounts (music-practice-api Worker)
 
 ### Status: built + deployed, **Stytch TEST credentials only** — not yet pointed at Stytch live.

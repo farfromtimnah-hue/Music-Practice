@@ -6,6 +6,7 @@ import KeyboardStudio from "./keyboard/KeyboardStudio.jsx";
 import Tuner from "./tuner/Tuner.jsx";
 import Songbook from "./songbook/Songbook.jsx";
 import StudentsAdmin from "./auth/StudentsAdmin.jsx";
+import Invite from "./auth/Invite.jsx";
 import { fetchRoster, signInWithPasskey, signInTeacherWithPasskey, setTeacherPin, clearTeacherPin } from "./auth/api.js";
 
 // ============================================================
@@ -65,6 +66,12 @@ const clearSession = () => {
 // ============================================================
 const ROUTES = { "#songbook": "songbook", "#songbook/set": "songbook" };
 const HASH_FOR = { songbook: "#songbook" };
+
+/** The invite token in #/invite/<token>, or null. An invite link works with no session at all. */
+const inviteFromHash = () => {
+  const m = (typeof window !== "undefined" ? window.location.hash : "").match(/^#\/invite\/([0-9a-f]{32})$/);
+  return m ? m[1] : null;
+};
 
 /** The screen a hash asks for, or null. Unknown hashes are ignored, not obeyed. */
 const routeFromHash = () => {
@@ -1074,6 +1081,7 @@ const [studentInstrument, setStudentInstrument] = useState(() =>
 const [studentServices, setStudentServices] = useState(() =>
   (boot && !bootTeacher ? servicesFor(boot.name) : []));
 // The active roster from the API (id, name, instrument, enrolled). null = not loaded yet.
+const [inviteToken, setInviteToken] = useState(() => inviteFromHash());
 const [roster, setRoster]         = useState(null);
 const [rosterErr, setRosterErr]   = useState("");
 const [authMsg, setAuthMsg]       = useState("");
@@ -1142,18 +1150,21 @@ setScreen("timeout");
 // a plain browser reload both reopen on the same screen. Routed screens write
 // their hash; everything else clears it rather than leaving a stale one behind.
 useEffect(() => {
+if (inviteToken) return; // an open invite page owns the hash
 if (screen==="nameSelect"||screen==="pin"||screen==="timeout") return;
 const want = HASH_FOR[screen] || "";
 if (window.location.hash === want) return;
 const url = window.location.pathname + window.location.search + want;
 try { window.history.replaceState(null, "", url); } catch (e) { /* ignore */ }
-}, [screen]);
+}, [screen, inviteToken]);
 
 // Back/forward and an externally changed hash both land here. A route is only
 // honoured for someone actually signed in; otherwise it is parked until the
 // PIN succeeds.
 useEffect(() => {
 const onHash = () => {
+const inv = inviteFromHash();
+if (inv) { setInviteToken(inv); return; }
 const r = routeFromHash();
 if (!r) return;
 if (readSession() && screen!=="pin" && screen!=="nameSelect" && screen!=="timeout") setScreen(r);
@@ -1432,6 +1443,14 @@ const TeacherNav = ({active}) => (
 </button>
 </nav>
 );
+
+// INVITE LINK — reachable with no session, ahead of the auth gate. It exposes
+// nothing but one row's own enrollment (see worker /invite/:token).
+if (inviteToken) return (<><style>{S}</style>
+  <Invite token={inviteToken} onExit={()=>{
+    try { window.history.replaceState(null, "", window.location.pathname + window.location.search); } catch (e) { /* ignore */ }
+    setInviteToken(null); loadRoster();
+  }}/></>);
 
 // ============================================================
 // AUTH GATE — one place, ahead of every screen branch below.

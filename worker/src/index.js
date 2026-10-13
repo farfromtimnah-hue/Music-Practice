@@ -1,10 +1,11 @@
 import stytch from "stytch";
 
 const INSTRUMENTS = ["guitar", "bass", "keys"];
-const PROD_ORIGINS = ["https://farfromtimnah-hue.github.io"];
+const PROD_ORIGINS = ["https://farfromtimnah-hue.github.io", "https://music-practice-8p2.pages.dev"];
 const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 const ENROLL_WINDOW_MS = 10 * 60 * 1000; // OTP verified -> passkey must be registered within this
 const RESEND_COOLDOWN_MS = 30 * 1000;
+const INVITE_TTL_MS = 72 * 60 * 60 * 1000; // invite links live 72 hours
 
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -93,9 +94,31 @@ const getStudent = async (env, id) => {
   return s;
 };
 
+const newInviteToken = () => {
+  const b = new Uint8Array(16);
+  crypto.getRandomValues(b);
+  return [...b].map((x) => x.toString(16).padStart(2, "0")).join(""); // 32 hex chars, 128 bits
+};
+// (Re)issue the invite link for one row. Replaces any earlier token, so old links die.
+const issueInvite = async (env, id) => {
+  const token = newInviteToken();
+  const exp = new Date(Date.now() + INVITE_TTL_MS).toISOString();
+  await env.DB.prepare("UPDATE students SET invite_token = ?, invite_expires_at = ? WHERE id = ?").bind(token, exp, id).run();
+  return { invite_token: token, invite_expires_at: exp };
+};
+// Public lookup by token. Unknown/removed -> 404, expired -> 410. Never returns the phone.
+const getByInvite = async (env, token) => {
+  if (!/^[0-9a-f]{32}$/.test(token)) throw new HttpError(404, "This invite link isn't valid");
+  const s = await env.DB.prepare("SELECT * FROM students WHERE invite_token = ? AND active = 1").bind(token).first();
+  if (!s) throw new HttpError(404, "This invite link isn't valid");
+  if (!s.invite_expires_at || Date.parse(s.invite_expires_at) < Date.now())
+    throw new HttpError(410, "This invite link has expired — ask your teacher for a new one");
+  return s;
+};
+
 const ids = (s) => (s.passkey_ids ? s.passkey_ids.split(",") : []);
 const publicStudent = (s) => ({ id: s.id, name: s.name, instrument: s.instrument, enrolled: ids(s).length > 0 });
-const teacherStudent = (s) => ({ ...publicStudent(s), role: s.role, phone: s.phone, created_at: s.created_at, active: !!s.active });
+const teacherStudent = (s) => ({ ...publicStudent(s), role: s.role, phone: s.phone, created_at: s.created_at, active: !!s.active, invite_token: s.invite_token, invite_expires_at: s.invite_expires_at });
 
 // Send (or re-send) the SMS passcode. loginOrCreate creates the Stytch user on first use.
 const sendOtp = async (env, student) => {
@@ -115,6 +138,46 @@ const registrationOptions = async (env, req, userId) => {
     use_base64_url_encoding: true,              // for navigator.credentials.create()
   });
   return JSON.parse(r.public_key_credential_creation_options);
+};
+
+// ---- enrollment flows: ONE implementation, reached by student id (teacher-present) or invite token ----
+const sendCodeFlow = async (env, s) => {
+  if (s.otp_sent_at && Date.now() - Date.parse(s.otp_sent_at) < RESEND_COOLDOWN_MS)
+    throw new HttpError(429, "A code was just sent — wait a few seconds");
+  await sendOtp(env, s);
+  return { otp_sent: true };
+};
+
+const verifyFlow = async (env, req, s, b) => {
+  const fresh = s.verified_at && Date.now() - Date.parse(s.verified_at) < ENROLL_WINDOW_MS;
+  if (b.code) {
+    if (!s.otp_method_id) throw new HttpError(400, "No code has been sent for this student");
+    await client(env).otps.authenticate({ method_id: s.otp_method_id, code: String(b.code).trim() });
+    await env.DB.prepare("UPDATE students SET verified_at = ?, otp_method_id = NULL WHERE id = ?")
+      .bind(new Date().toISOString(), s.id).run();
+  } else if (!fresh) {
+    throw new HttpError(400, "Enter the code from the text message");
+  } // else: code accepted moments ago (e.g. the passkey sheet was dismissed) — issue a new challenge
+  return {
+    verified: true,
+    student: publicStudent(s),
+    public_key_credential_creation_options: await registrationOptions(env, req, s.stytch_user_id),
+  };
+};
+
+const passkeyFlow = async (env, s, b) => {
+  if (!s.verified_at || Date.now() - Date.parse(s.verified_at) > ENROLL_WINDOW_MS)
+    throw new HttpError(403, "Phone not verified (or the setup window expired) — ask the teacher to send a new code");
+  if (!b.public_key_credential) throw new HttpError(400, "public_key_credential required");
+  const r = await client(env).webauthn.register({
+    user_id: s.stytch_user_id,
+    public_key_credential: typeof b.public_key_credential === "string" ? b.public_key_credential : JSON.stringify(b.public_key_credential),
+  });
+  // Appends this registration to THIS row only: siblings sharing a phone/Stytch user keep separate passkey_ids.
+  // The invite token is single-purpose, so it is spent once a passkey exists.
+  await env.DB.prepare("UPDATE students SET passkey_ids = ?, verified_at = NULL, invite_token = NULL, invite_expires_at = NULL WHERE id = ?")
+    .bind([...ids(s), r.webauthn_registration_id].join(","), s.id).run();
+  return { registered: true, student: { ...publicStudent(s), enrolled: true }, webauthn_registration_id: r.webauthn_registration_id };
 };
 
 const routes = [
@@ -147,58 +210,47 @@ const routes = [
       if (/UNIQUE/i.test(String(e.message))) throw new HttpError(409, `${name} is already on the roster`);
       throw e;
     }
+    // Invite mode: no SMS now, the invited person triggers it from their own device.
+    const invite = await issueInvite(env, row.id);
+    if (b.mode === "invite") return { student: publicStudent(row), otp_sent: false, ...invite };
     try { await sendOtp(env, row); }
     catch (e) {
       // Do not leave a student nobody can enroll: roll the row back (it never had history).
       await env.DB.prepare("DELETE FROM students WHERE id = ?").bind(row.id).run();
       throw e;
     }
-    return { student: publicStudent(await getStudent(env, row.id)), otp_sent: true };
+    return { student: publicStudent(await getStudent(env, row.id)), otp_sent: true, ...invite };
   }, 201],
 
   ["POST", /^\/students\/(\d+)\/resend$/, async (req, env, m) => {
     await requireTeacher(req, env);
+    return sendCodeFlow(env, await getStudent(env, m[1]));
+  }],
+
+  ["POST", /^\/students\/(\d+)\/invite$/, async (req, env, m) => {
+    await requireTeacher(req, env);
     const s = await getStudent(env, m[1]);
-    if (s.otp_sent_at && Date.now() - Date.parse(s.otp_sent_at) < RESEND_COOLDOWN_MS)
-      throw new HttpError(429, "A code was just sent — wait a few seconds");
-    await sendOtp(env, s);
-    return { otp_sent: true };
+    return issueInvite(env, s.id);
   }],
 
   // Check the SMS code, then hand back the passkey registration challenge.
-  ["POST", /^\/students\/(\d+)\/verify$/, async (req, env, m) => {
-    const s = await getStudent(env, m[1]);
-    const b = await readBody(req);
-    const fresh = s.verified_at && Date.now() - Date.parse(s.verified_at) < ENROLL_WINDOW_MS;
-    if (b.code) {
-      if (!s.otp_method_id) throw new HttpError(400, "No code has been sent for this student");
-      await client(env).otps.authenticate({ method_id: s.otp_method_id, code: String(b.code).trim() });
-      await env.DB.prepare("UPDATE students SET verified_at = ?, otp_method_id = NULL WHERE id = ?")
-        .bind(new Date().toISOString(), s.id).run();
-    } else if (!fresh) {
-      throw new HttpError(400, "Enter the code from the text message");
-    } // else: code accepted moments ago (e.g. the passkey sheet was dismissed) — issue a new challenge
-    return {
-      verified: true,
-      student: publicStudent(s),
-      public_key_credential_creation_options: await registrationOptions(env, req, s.stytch_user_id),
-    };
-  }],
+  ["POST", /^\/students\/(\d+)\/verify$/, async (req, env, m) =>
+    verifyFlow(env, req, await getStudent(env, m[1]), await readBody(req))],
 
-  ["POST", /^\/students\/(\d+)\/passkey$/, async (req, env, m) => {
-    const s = await getStudent(env, m[1]);
-    if (!s.verified_at || Date.now() - Date.parse(s.verified_at) > ENROLL_WINDOW_MS)
-      throw new HttpError(403, "Phone not verified (or the setup window expired) — ask the teacher to send a new code");
-    const b = await readBody(req);
-    if (!b.public_key_credential) throw new HttpError(400, "public_key_credential required");
-    const r = await client(env).webauthn.register({
-      user_id: s.stytch_user_id,
-      public_key_credential: typeof b.public_key_credential === "string" ? b.public_key_credential : JSON.stringify(b.public_key_credential),
-    });
-    await env.DB.prepare("UPDATE students SET passkey_ids = ?, verified_at = NULL WHERE id = ?")
-      .bind([...ids(s), r.webauthn_registration_id].join(","), s.id).run();
-    return { registered: true, student: { ...publicStudent(s), enrolled: true }, webauthn_registration_id: r.webauthn_registration_id };
+  ["POST", /^\/students\/(\d+)\/passkey$/, async (req, env, m) =>
+    passkeyFlow(env, await getStudent(env, m[1]), await readBody(req))],
+
+  // ---- invite links: public, no teacher auth. A token only ever reaches its own row's enrollment. ----
+  ["GET", /^\/invite\/([0-9a-f]+)$/, async (req, env, m) => {
+    const s = await getByInvite(env, m[1]);
+    return { name: s.name, instrument: s.instrument, role: s.role, expires_at: s.invite_expires_at };
   }],
+  ["POST", /^\/invite\/([0-9a-f]+)\/send$/, async (req, env, m) =>
+    sendCodeFlow(env, await getByInvite(env, m[1]))], // phone comes from the stored row only; the body is never read
+  ["POST", /^\/invite\/([0-9a-f]+)\/verify$/, async (req, env, m) =>
+    verifyFlow(env, req, await getByInvite(env, m[1]), await readBody(req))],
+  ["POST", /^\/invite\/([0-9a-f]+)\/passkey$/, async (req, env, m) =>
+    passkeyFlow(env, await getByInvite(env, m[1]), await readBody(req))],
 
   ["POST", /^\/auth\/passkey\/start$/, async (req, env) => {
     const b = await readBody(req);

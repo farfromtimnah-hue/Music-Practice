@@ -56,6 +56,7 @@ export const fetchRoster = () => call("GET", "/roster").then((d) => d.students);
 export const listStudents = () => call("GET", "/students", undefined, { teacher: true }).then((d) => d.students);
 export const createStudent = (s) => call("POST", "/students", s, { teacher: true });
 export const resendCode = (id) => call("POST", `/students/${id}/resend`, {}, { teacher: true });
+export const issueInvite = (id) => call("POST", `/students/${id}/invite`, {}, { teacher: true });
 export const removeStudent = (id) => call("POST", `/students/${id}/remove`, {}, { teacher: true });
 
 // ---- WebAuthn plumbing ----
@@ -111,22 +112,34 @@ const friendlyWebAuthnError = (e) => {
 export const verifyCode = (id, code) =>
   call("POST", `/students/${id}/verify`, code ? { code } : {}).then((d) => d.public_key_credential_creation_options);
 
-/** Create the passkey on THIS device, then complete registration. */
-export const registerPasskey = async (id, options) => {
+// Ask THIS device to create the passkey (the browser shows the Face ID / Touch ID / passcode sheet).
+const createCredential = async (options) => {
   if (!webauthnSupported()) throw new ApiError(0, "This browser doesn't support passkeys");
-  let cred;
   try {
-    cred = await navigator.credentials.create({
+    return serializeAttestation(await navigator.credentials.create({
       publicKey: {
         ...options,
         challenge: b64uToBuf(options.challenge),
         user: { ...options.user, id: b64uToBuf(options.user.id) },
         excludeCredentials: decodeDescriptors(options.excludeCredentials),
       },
-    });
+    }));
   } catch (e) { throw new ApiError(0, friendlyWebAuthnError(e)); }
-  return call("POST", `/students/${id}/passkey`, { public_key_credential: JSON.stringify(serializeAttestation(cred)) });
 };
+
+/** Create the passkey on THIS device, then complete registration. */
+export const registerPasskey = async (id, options) =>
+  call("POST", `/students/${id}/passkey`, { public_key_credential: JSON.stringify(await createCredential(options)) });
+
+// ---- invite links (public: the token in the URL is the only credential, and only for its own row) ----
+export const inviteInfo = (token) => call("GET", `/invite/${token}`);
+export const inviteSend = (token) => call("POST", `/invite/${token}/send`, {});
+export const inviteVerify = (token, code) =>
+  call("POST", `/invite/${token}/verify`, code ? { code } : {}).then((d) => d.public_key_credential_creation_options);
+export const inviteRegister = async (token, options) =>
+  call("POST", `/invite/${token}/passkey`, { public_key_credential: JSON.stringify(await createCredential(options)) });
+
+export const inviteLink = (token) => `${window.location.origin}${window.location.pathname}#/invite/${token}`;
 
 // ---- sign-in ----
 // Shared ceremony: ask the Worker for a challenge, let the device answer it, send the answer back.
