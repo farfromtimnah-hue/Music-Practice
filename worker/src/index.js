@@ -140,6 +140,25 @@ const registrationOptions = async (env, req, userId) => {
   return JSON.parse(r.public_key_credential_creation_options);
 };
 
+// Count one attempt against `key` and refuse once `limit` is exceeded inside the window.
+// Single atomic upsert, so concurrent requests can't both slip under the limit.
+const RATE_WINDOW_MS = 60 * 60 * 1000;
+const rateLimit = async (env, key, limit) => {
+  const now = Date.now();
+  const row = await env.DB.prepare(
+    `INSERT INTO rate_limits (key, count, window_start) VALUES (?1, 1, ?2)
+     ON CONFLICT(key) DO UPDATE SET
+       count = CASE WHEN window_start <= ?2 - ?3 THEN 1 ELSE count + 1 END,
+       window_start = CASE WHEN window_start <= ?2 - ?3 THEN ?2 ELSE window_start END
+     RETURNING count, window_start`
+  ).bind(key, now, RATE_WINDOW_MS).first();
+  if (row.count > limit) {
+    const mins = Math.max(1, Math.ceil((row.window_start + RATE_WINDOW_MS - now) / 60000));
+    throw new HttpError(429, `Too many attempts — try again in about ${mins} minute${mins === 1 ? "" : "s"}, or ask your teacher for a new link.`);
+  }
+  env.DB.prepare("DELETE FROM rate_limits WHERE window_start < ?").bind(now - 2 * RATE_WINDOW_MS).run().catch(() => {}); // tidy old windows
+};
+
 // ---- enrollment flows: ONE implementation, reached by student id (teacher-present) or invite token ----
 const sendCodeFlow = async (env, s) => {
   if (s.otp_sent_at && Date.now() - Date.parse(s.otp_sent_at) < RESEND_COOLDOWN_MS)
@@ -245,10 +264,19 @@ const routes = [
     const s = await getByInvite(env, m[1]);
     return { name: s.name, instrument: s.instrument, role: s.role, expires_at: s.invite_expires_at };
   }],
-  ["POST", /^\/invite\/([0-9a-f]+)\/send$/, async (req, env, m) =>
-    sendCodeFlow(env, await getByInvite(env, m[1]))], // phone comes from the stored row only; the body is never read
-  ["POST", /^\/invite\/([0-9a-f]+)\/verify$/, async (req, env, m) =>
-    verifyFlow(env, req, await getByInvite(env, m[1]), await readBody(req))],
+  ["POST", /^\/invite\/([0-9a-f]+)\/send$/, async (req, env, m) => {
+    const s = await getByInvite(env, m[1]);
+    await rateLimit(env, `send:${m[1]}`, 3); // each send is a real SMS: 3 per token per hour
+    return sendCodeFlow(env, s); // phone comes from the stored row only; the body is never read
+  }],
+  ["POST", /^\/invite\/([0-9a-f]+)\/verify$/, async (req, env, m) => {
+    const s = await getByInvite(env, m[1]);
+    const b = await readBody(req);
+    // Only code guesses count (6 digits must not be brute-forceable); re-issuing a passkey
+    // challenge right after an accepted code carries no guess and stays free.
+    if (b.code) await rateLimit(env, `verify:${m[1]}`, 5);
+    return verifyFlow(env, req, s, b);
+  }],
   ["POST", /^\/invite\/([0-9a-f]+)\/passkey$/, async (req, env, m) =>
     passkeyFlow(env, await getByInvite(env, m[1]), await readBody(req))],
 

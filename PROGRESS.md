@@ -2,6 +2,23 @@
 
 ---
 
+## 2026-10-12 — Rate limiting on the public invite routes
+
+`POST /invite/:token/send` — **3 per token per hour**. `POST /invite/:token/verify` — **5 code attempts per token per hour**.
+Over the limit → **429** `"Too many attempts — try again in about N minutes, or ask your teacher for a new link."` (the invite page already shows API error text).
+
+**Approach: a D1 counter table, not Cloudflare's native rate limiting.** The Workers Rate Limiting binding only supports 10- or 60-second periods, so it cannot express "3 per hour". Migration `0005_rate_limits.sql` adds `rate_limits(key, count, window_start)`; `rateLimit()` in `worker/src/index.js` does one atomic upsert (`INSERT … ON CONFLICT DO UPDATE … RETURNING`) per attempt, fixed 1-hour window, keys `send:<token>` / `verify:<token>` (per token, not per IP). Windows older than 2h are deleted opportunistically.
+- The limiter runs **after** `getByInvite` (so random/expired tokens never create rows) and **before** any Stytch call, so a blocked `/send` never texts.
+- Attempts count whether or not they succeed (a failed Stytch call still burns one).
+- `/verify` only counts requests that carry a `code`; the no-code "retry passkey after dismissing the sheet" call is free so a parent isn't locked out by a cancelled Face ID prompt.
+- Regenerating the invite (new token) gives a fresh budget — only the teacher can do that.
+- Not changed: everything else in the invite flow, the id-based teacher-present routes (`/students/:id/verify|resend`, which are not token-routes and not covered by this change).
+- Gap: `/students/:id/verify` (public, by id) is still unlimited apart from Stytch's own OTP attempt limits.
+
+Tested against the deployed Worker with throwaway rows whose phone (`+15555550123`) Stytch rejects as invalid, so no SMS could go out: sends → `400 400 400 429 429`; verifies → `400 400 400 400 400 429 429`; a second token unaffected; no-code verify still `400` (not 429) after the limit. In the very first run one early verify slipped through (6 passed) and did not reproduce in three reruns; likely a request served by the previous Worker version mid-rollout, not confirmed.
+
+---
+
 ## 2026-10-12 — Invite links for enrollment (no student device needed at creation)
 
 ### Status: built + deployed (Worker version after migration 0004). **Stytch TEST credentials still.**
