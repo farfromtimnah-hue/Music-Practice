@@ -2,6 +2,18 @@
 
 ---
 
+## 2026-10-12 — Phone field auto-formats as you type (accessibility)
+
+The Add Student "Parent's mobile number" field now formats live to `(401) 651-4117`. This is an accessibility fix, not polish: the parens and dash let a dyslexic reader count digits and catch a missing, doubled or swapped one before submitting; an unbroken 10-digit string can't be parsed.
+- New `src/auth/PhoneInput.jsx` (used only by that one field in `StudentsAdmin.jsx`); `formatPhone` + caret handling live there.
+- US: any typing/paste formats live, caps at 10 digits, drops a leading country-code `1` once it's an 11-digit entry.
+- Starts with `+`: not forced into the US pattern — kept as `+` and digits only (spaces/dashes the user types are dropped), up to 15 digits.
+- Editing: the caret stays beside the digit being edited (middle inserts/deletes don't jump to the end). Backspace/Delete over a separator `(` `)` space `-` removes the neighbouring digit instead of appearing dead.
+- Unchanged on purpose: the Worker's `normalizePhone()`, what gets sent (the displayed string; the Worker already strips punctuation), the other form fields, and the roster list, which still shows the stored `+1…` number.
+- Tested in a real browser (isolated page, since the form is behind teacher passkey sign-in): digit-by-digit typing, 11th digit ignored, delete from end to empty, delete in the middle, insert in the middle, backspace over `) `, forward-delete, `+55 11 99999-0000`, and `1 401 651 4117`. Worker `normalizePhone` run on the displayed strings: `(401) 651-4117` → `+14016514117`, `+5511999990000` passes, partial numbers are rejected as before. Not run: a real `POST /students` (needs a teacher token, which can't be obtained without a passkey tap).
+
+---
+
 ## 2026-10-12 — Rate limiting on the public invite routes
 
 `POST /invite/:token/send` — **3 per token per hour**. `POST /invite/:token/verify` — **5 code attempts per token per hour**.

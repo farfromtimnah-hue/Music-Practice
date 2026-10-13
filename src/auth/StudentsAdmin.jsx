@@ -4,6 +4,7 @@ import {
   issueInvite, inviteLink, verifyCode, registerPasskey, ApiError,
 } from "./api.js";
 import { css, EnrollFlow } from "./EnrollSteps.jsx";
+import PhoneInput from "./PhoneInput.jsx";
 
 // Teacher-only: roster, Add Student, Remove Student.
 // Two ways to enroll: (1) send an invite LINK the parent opens on the student's own device, or
@@ -81,8 +82,8 @@ export default function StudentsAdmin({ onRosterChange }) {
           <button key={v} className="ghost-btn" style={form.instrument === v ? { borderColor: "var(--teacher)", color: "var(--teacher)", background: "rgba(192,132,252,.12)" } : null}
             onClick={() => setForm({ ...form, instrument: v })}>{l}</button>)}</div></div>
       <div className="sa-field"><div className="sec-lbl">Parent's mobile number</div>
-        <input className="sa-input" type="tel" inputMode="tel" placeholder="(813) 555-0123 or +55…" value={form.phone}
-          onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
+        <PhoneInput className="sa-input" placeholder="(813) 555-0123 or +55…" value={form.phone}
+          onChange={(phone) => setForm({ ...form, phone })} /></div>
       <button className="ghost-btn" style={form.role === "teacher" ? { borderColor: "var(--teacher)", color: "var(--teacher)" } : null}
         onClick={() => setForm({ ...form, role: form.role === "teacher" ? "student" : "teacher" })}>
         {form.role === "teacher" ? "✓ Teacher / admin account (not shown to students)" : "Make this the teacher / admin account"}</button>
