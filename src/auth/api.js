@@ -13,7 +13,20 @@ export const getTeacherPin = () => {
   try { pinMem = sessionStorage.getItem(PIN_KEY) || ""; } catch (e) { /* ignore */ }
   return pinMem;
 };
-export const clearTeacherPin = () => { pinMem = ""; try { sessionStorage.removeItem(PIN_KEY); } catch (e) { /* ignore */ } };
+// A teacher who signed in with a passkey holds a short-lived Worker token instead of the PIN.
+const TOK_KEY = "mp_ttok";
+let tokMem = "";
+export const setTeacherToken = (t) => { tokMem = t; try { sessionStorage.setItem(TOK_KEY, t); } catch (e) { /* ignore */ } };
+const getTeacherToken = () => {
+  if (tokMem) return tokMem;
+  try { tokMem = sessionStorage.getItem(TOK_KEY) || ""; } catch (e) { /* ignore */ }
+  return tokMem;
+};
+export const hasTeacherAuth = () => !!(getTeacherPin() || getTeacherToken());
+export const clearTeacherPin = () => {
+  pinMem = ""; tokMem = "";
+  try { sessionStorage.removeItem(PIN_KEY); sessionStorage.removeItem(TOK_KEY); } catch (e) { /* ignore */ }
+};
 
 export class ApiError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -22,7 +35,10 @@ export class ApiError extends Error {
 const call = async (method, path, body, { teacher = false } = {}) => {
   const headers = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  if (teacher) headers["X-Teacher-PIN"] = getTeacherPin();
+  if (teacher) {
+    if (getTeacherPin()) headers["X-Teacher-PIN"] = getTeacherPin();
+    else if (getTeacherToken()) headers["X-Teacher-Token"] = getTeacherToken();
+  }
   let res;
   try {
     res = await fetch(API_URL + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -113,14 +129,21 @@ export const registerPasskey = async (id, options) => {
 };
 
 // ---- sign-in ----
-export const signInWithPasskey = async (id) => {
+// Shared ceremony: ask the Worker for a challenge, let the device answer it, send the answer back.
+const passkeyCeremony = async (startBody) => {
   if (!webauthnSupported()) throw new ApiError(0, "This browser doesn't support passkeys");
-  const { public_key_credential_request_options: o } = await call("POST", "/auth/passkey/start", { student_id: id });
+  const { public_key_credential_request_options: o } = await call("POST", "/auth/passkey/start", startBody);
   let cred;
   try {
     cred = await navigator.credentials.get({
       publicKey: { ...o, challenge: b64uToBuf(o.challenge), allowCredentials: decodeDescriptors(o.allowCredentials) },
     });
   } catch (e) { throw new ApiError(0, friendlyWebAuthnError(e)); }
-  return call("POST", "/auth/passkey", { student_id: id, public_key_credential: JSON.stringify(serializeAssertion(cred)) });
+  return call("POST", "/auth/passkey", { ...startBody, public_key_credential: JSON.stringify(serializeAssertion(cred)) });
+};
+export const signInWithPasskey = (id) => passkeyCeremony({ student_id: id });
+export const signInTeacherWithPasskey = async () => {
+  const r = await passkeyCeremony({ role: "teacher" });
+  setTeacherToken(r.teacher_token); // unlocks the teacher-only API calls, like the PIN does
+  return r;
 };

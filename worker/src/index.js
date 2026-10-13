@@ -18,7 +18,7 @@ const corsHeaders = (req) => {
   if (originAllowed(o)) {
     h["Access-Control-Allow-Origin"] = o;
     h["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
-    h["Access-Control-Allow-Headers"] = "Content-Type, X-Teacher-PIN";
+    h["Access-Control-Allow-Headers"] = "Content-Type, X-Teacher-PIN, X-Teacher-Token";
     h["Access-Control-Max-Age"] = "86400";
   }
   return h;
@@ -42,9 +42,28 @@ const safeEqual = (a, b) => {
   return d === 0;
 };
 
-const requireTeacher = (req, env) => {
+// A teacher who signed in with a passkey has no PIN to send, so the Worker hands back a
+// short-lived HMAC token (keyed with the Stytch secret) that unlocks the same teacher calls.
+const TEACHER_TOKEN_MS = 8 * 60 * 60 * 1000;
+const hmacHex = async (env, msg) => {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.STYTCH_SECRET),
+    { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msg));
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
+};
+const mintTeacherToken = async (env, teacherId) => {
+  const exp = Date.now() + TEACHER_TOKEN_MS;
+  return `${teacherId}.${exp}.${await hmacHex(env, `teacher.${teacherId}.${exp}`)}`;
+};
+const requireTeacher = async (req, env) => {
   const pin = req.headers.get("X-Teacher-PIN") || "";
-  if (!env.TEACHER_PIN || !safeEqual(pin, env.TEACHER_PIN)) throw new HttpError(401, "Teacher PIN required");
+  if (pin && env.TEACHER_PIN && safeEqual(pin, env.TEACHER_PIN)) return;
+  const [id, exp, sig] = (req.headers.get("X-Teacher-Token") || "").split(".");
+  if (sig && Number(exp) > Date.now() && safeEqual(sig, await hmacHex(env, `teacher.${id}.${exp}`))) {
+    const t = await env.DB.prepare("SELECT 1 FROM students WHERE id = ? AND role = 'teacher' AND active = 1").bind(Number(id)).first();
+    if (t) return;
+  }
+  throw new HttpError(401, "Teacher PIN required");
 };
 
 // WebAuthn binds a passkey to the page's hostname (the RP ID), so it comes from the
@@ -82,7 +101,7 @@ const sendOtp = async (env, student) => {
   const res = await client(env).otps.sms.loginOrCreate({ phone_number: student.phone, expiration_minutes: 10 });
   await env.DB.prepare(
     "UPDATE students SET stytch_user_id = ?, otp_method_id = ?, otp_sent_at = ?, verified_at = NULL WHERE id = ?"
-  ).bind(res.user_id, res.method_id, new Date().toISOString(), student.id).run();
+  ).bind(res.user_id, res.phone_id, new Date().toISOString(), student.id).run();
   return res.user_id;
 };
 
@@ -105,13 +124,13 @@ const routes = [
   }],
 
   ["GET", /^\/students$/, async (req, env) => {
-    requireTeacher(req, env);
+    await requireTeacher(req, env);
     const { results } = await env.DB.prepare("SELECT * FROM students WHERE active = 1 ORDER BY name COLLATE NOCASE").all();
     return { students: results.map(teacherStudent) };
   }],
 
   ["POST", /^\/students$/, async (req, env) => {
-    requireTeacher(req, env);
+    await requireTeacher(req, env);
     const b = await readBody(req);
     const name = String(b.name || "").trim();
     const instrument = String(b.instrument || "");
@@ -137,7 +156,7 @@ const routes = [
   }, 201],
 
   ["POST", /^\/students\/(\d+)\/resend$/, async (req, env, m) => {
-    requireTeacher(req, env);
+    await requireTeacher(req, env);
     const s = await getStudent(env, m[1]);
     if (s.otp_sent_at && Date.now() - Date.parse(s.otp_sent_at) < RESEND_COOLDOWN_MS)
       throw new HttpError(429, "A code was just sent — wait a few seconds");
@@ -182,6 +201,16 @@ const routes = [
 
   ["POST", /^\/auth\/passkey\/start$/, async (req, env) => {
     const b = await readBody(req);
+    if (b.role === "teacher") {
+      // No user_id: Stytch issues a challenge for any passkey on this domain; /auth/passkey then
+      // matches the answer to an enrolled teacher row. /roster stays student-only.
+      const t = await env.DB.prepare("SELECT 1 FROM students WHERE role = 'teacher' AND active = 1 AND passkey_ids IS NOT NULL AND passkey_ids != ''").first();
+      if (!t) throw new HttpError(409, "No teacher passkey is set up yet");
+      const r = await client(env).webauthn.authenticateStart({
+        domain: rpDomain(req), return_passkey_credential_options: true, use_base64_url_encoding: true,
+      });
+      return { public_key_credential_request_options: JSON.parse(r.public_key_credential_request_options) };
+    }
     const s = await getStudent(env, b.student_id);
     if (!ids(s).length) throw new HttpError(409, "This student has no passkey yet — ask the teacher to set them up");
     const r = await client(env).webauthn.authenticateStart({
@@ -195,8 +224,18 @@ const routes = [
 
   ["POST", /^\/auth\/passkey$/, async (req, env) => {
     const b = await readBody(req);
-    const s = await getStudent(env, b.student_id);
     if (!b.public_key_credential) throw new HttpError(400, "public_key_credential required");
+    if (b.role === "teacher") {
+      const r = await client(env).webauthn.authenticate({
+        public_key_credential: typeof b.public_key_credential === "string" ? b.public_key_credential : JSON.stringify(b.public_key_credential),
+        session_duration_minutes: 60,
+      });
+      const { results } = await env.DB.prepare("SELECT * FROM students WHERE role = 'teacher' AND active = 1 AND stytch_user_id = ?").bind(r.user_id).all();
+      const t = results.find((x) => ids(x).includes(r.webauthn_registration_id));
+      if (!t) throw new HttpError(401, "That passkey does not belong to a teacher account");
+      return { authenticated: true, role: "teacher", student: publicStudent(t), session_token: r.session_token, teacher_token: await mintTeacherToken(env, t.id) };
+    }
+    const s = await getStudent(env, b.student_id);
     const r = await client(env).webauthn.authenticate({
       public_key_credential: typeof b.public_key_credential === "string" ? b.public_key_credential : JSON.stringify(b.public_key_credential),
       session_duration_minutes: 60,
@@ -208,7 +247,7 @@ const routes = [
   }],
 
   ["POST", /^\/students\/(\d+)\/remove$/, async (req, env, m) => {
-    requireTeacher(req, env);
+    await requireTeacher(req, env);
     const s = await getStudent(env, m[1]);
     if (s.role === "teacher") throw new HttpError(400, "The teacher account can't be removed here");
     await env.DB.prepare("UPDATE students SET active = 0 WHERE id = ?").bind(s.id).run(); // soft delete: row + name kept for history

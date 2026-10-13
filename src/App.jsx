@@ -6,7 +6,7 @@ import KeyboardStudio from "./keyboard/KeyboardStudio.jsx";
 import Tuner from "./tuner/Tuner.jsx";
 import Songbook from "./songbook/Songbook.jsx";
 import StudentsAdmin from "./auth/StudentsAdmin.jsx";
-import { fetchRoster, signInWithPasskey, setTeacherPin, clearTeacherPin } from "./auth/api.js";
+import { fetchRoster, signInWithPasskey, signInTeacherWithPasskey, setTeacherPin, clearTeacherPin } from "./auth/api.js";
 
 // ============================================================
 // TEACHER PIN
@@ -1222,6 +1222,19 @@ setScreen(dest || "teacherHome");
 }
 };
 
+// Teacher sign-in by passkey — a second way in beside PIN 9999, same outcome.
+const handleTeacherPasskey = async () => {
+setAuthBusy(true); setAuthMsg("");
+try {
+await signInTeacherWithPasskey();
+setPin(""); setIsTeacher(true);
+writeSession(TEACHER_ID);
+const dest = pendingRoute; setPendingRoute(null);
+setScreen(dest || "teacherHome");
+} catch (e) { setAuthMsg(e.message || "Sign-in failed"); }
+finally { setAuthBusy(false); }
+};
+
 // Student sign-in: the iPad's own Face ID / Touch ID / passcode, via the student's passkey.
 const handlePasskeySignIn = async () => {
 const student = (roster||[]).find(s => s.name===selectedLoginName);
@@ -1469,6 +1482,8 @@ if (screen!=="nameSelect" && screen!=="pin" && screen!=="timeout" && !readSessio
       </div>
       <div style={{width:"100%",maxWidth:320}}>
         <button className="teacher-btn" onClick={()=>handleNameSelect(TEACHER_ID)}>🎓 Teacher Login</button>
+<button className="teacher-btn" style={{marginTop:10}} disabled={authBusy} onClick={handleTeacherPasskey}>{authBusy?"Checking…":"🎓 Teacher — Face ID / Touch ID"}</button>
+{authMsg && <div className="pin-error" style={{textAlign:"center",marginTop:8}}>{authMsg}</div>}
       </div>
     </div></>);
 }
@@ -1502,6 +1517,8 @@ if (screen==="nameSelect") return (
 </div>
 <div style={{width:"100%",maxWidth:320}}>
 <button className="teacher-btn" onClick={()=>handleNameSelect("__teacher__")}>🎓 Teacher Login</button>
+<button className="teacher-btn" style={{marginTop:10}} disabled={authBusy} onClick={handleTeacherPasskey}>{authBusy?"Checking…":"🎓 Teacher — Face ID / Touch ID"}</button>
+{authMsg && <div className="pin-error" style={{textAlign:"center",marginTop:8}}>{authMsg}</div>}
 </div>
 </div></>
 );
@@ -1523,7 +1540,8 @@ if (screen==="pin") return (
 <div/><button className="pin-btn" onClick={()=>handlePin("0")}>0</button>
 <button className="pin-btn" style={{fontSize:18,color:"var(--muted)"}} onClick={()=>setPin(p=>p.slice(0,-1))}>⌫</button>
 </div>
-<div className="pin-error">{pinError?"Incorrect PIN — try again":""}</div>
+<div className="pin-error">{pinError?"Incorrect PIN — try again":(authMsg||"")}</div>
+<button className="teacher-btn" disabled={authBusy} onClick={handleTeacherPasskey}>{authBusy?"Checking…":"Use Face ID / Touch ID instead"}</button>
 </>) : (() => {
 const st = (roster||[]).find(x => x.name===selectedLoginName);
 return (<div style={{width:"100%",maxWidth:320,display:"flex",flexDirection:"column",gap:14}}>

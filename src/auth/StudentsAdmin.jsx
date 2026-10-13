@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  getTeacherPin, setTeacherPin, listStudents, createStudent, resendCode, removeStudent,
+  hasTeacherAuth, setTeacherPin, listStudents, createStudent, resendCode, removeStudent,
   verifyCode, registerPasskey, ApiError,
 } from "./api.js";
 
@@ -25,7 +25,7 @@ const css = `
 const INSTRUMENTS = [["guitar", "🎸 Guitar"], ["bass", "🎸 Bass"], ["keys", "🎹 Keys"]];
 
 export default function StudentsAdmin({ onRosterChange }) {
-  const [pinOk, setPinOk] = useState(!!getTeacherPin());
+  const [pinOk, setPinOk] = useState(hasTeacherAuth());
   const [pinIn, setPinIn] = useState("");
   const [students, setStudents] = useState(null);
   const [err, setErr] = useState("");
