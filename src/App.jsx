@@ -4,6 +4,7 @@ import OpenVoicingsStudio from "./openvoicings/OpenVoicingsStudio.jsx";
 import RichVoicingsStudio from "./pianovoicings/RichVoicingsStudio.jsx";
 import KeyboardStudio from "./keyboard/KeyboardStudio.jsx";
 import Tuner from "./tuner/Tuner.jsx";
+import CircleFill from "./circlefill/CircleFill.jsx";
 import Songbook from "./songbook/Songbook.jsx";
 import StudentsAdmin from "./auth/StudentsAdmin.jsx";
 import Invite from "./auth/Invite.jsx";
@@ -332,6 +333,34 @@ body{font-family:'Source Sans 3',sans-serif;background:var(--bg);color:var(--tex
 .teacher-btn{padding:13px;border-radius:var(--radius);border:1.5px solid var(--teacher);background:rgba(192,132,252,.08);color:var(--teacher);font-family:'Oswald',sans-serif;font-size:14px;font-weight:600;letter-spacing:1px;cursor:pointer;width:100%;transition:all .15s;}
 .teacher-btn:active{background:rgba(192,132,252,.2);}
 .sec-lbl{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);}
+
+/* FILL IN THE CIRCLE */
+.cf-shell{max-width:480px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;gap:12px;padding:16px 16px 32px;}
+.cf-head{display:flex;align-items:center;justify-content:space-between;}
+.cf-back{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;font-family:'Source Sans 3',sans-serif;}
+.cf-stage{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);}
+.cf-count{font-size:12px;color:var(--muted);}
+.cf-title{font-family:'Oswald',sans-serif;font-size:20px;font-weight:600;color:var(--gold);letter-spacing:1px;text-align:center;}
+.cf-circle{width:100%;max-width:290px;margin:0 auto;display:block;}
+.cf-hint{font-size:14px;color:var(--muted);text-align:center;line-height:1.5;}
+.cf-small{font-size:12px;opacity:.8;}
+.cf-ask{font-size:16px;color:var(--text);text-align:center;}
+.cf-slots{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;}
+.cf-slot{min-width:42px;padding:8px 6px;border-radius:10px;border:1.5px solid var(--border);background:var(--surface);color:var(--muted);font-family:'Oswald',sans-serif;font-size:15px;font-weight:700;cursor:pointer;}
+.cf-slot.on{color:var(--text);border-color:rgba(129,199,132,.5);cursor:default;}
+.cf-slot.cur{border-color:var(--gold);color:var(--gold);}
+.cf-pal{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;}
+.cf-pbtn{padding:14px 2px;border-radius:10px;border:1.5px solid var(--border);background:var(--surface);color:var(--text);font-family:'Oswald',sans-serif;font-size:18px;font-weight:700;cursor:pointer;}
+.cf-pbtn:active{transform:scale(.94);}
+.cf-pbtn.bad{border-color:var(--dim);background:rgba(239,83,80,.18);color:var(--dim);animation:shake .3s;}
+.cf-pbtn.hint{border-color:var(--gold);box-shadow:0 0 10px rgba(240,192,64,.6);}
+.cf-nums{display:grid;grid-template-columns:repeat(8,1fr);gap:6px;}
+.cf-notes{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;}
+.cf-results{display:flex;flex-direction:column;align-items:center;gap:10px;padding:8px 0;}
+.cf-score{font-family:'Oswald',sans-serif;font-size:56px;font-weight:700;color:var(--gold);}
+.cf-line{font-size:15px;color:var(--text);}
+.cf-msg{font-size:16px;color:var(--text);text-align:center;max-width:300px;line-height:1.5;margin-bottom:6px;}
+.cf-results .primary-btn,.cf-results .ghost-btn{max-width:300px;}
 
 /* QUIZ */
 .quiz-screen{min-height:100vh;display:flex;flex-direction:column;padding:40px 24px 32px;gap:24px;}
@@ -1587,6 +1616,13 @@ if (screen==="richVoicings") {
   return (<><style>{S}</style><RichVoicingsStudio onBack={()=>setScreen("teacherHome")}/></>);
 }
 
+// FILL IN THE CIRCLE — blank-circle practice, everyone
+if (screen==="circleFill") {
+  return (<><style>{S}</style>
+    <CircleFill onBack={goHome} onLog={(a)=>logActivity(studentName||"teacher",a)}/>
+  </>);
+}
+
 // KEYBOARD STUDIO — piano/keys students (Lara) and Teacher
 if (screen==="keyboardStudio") {
   if (!isTeacher && studentInstrument!=="keys") { setScreen("home"); return null; }
@@ -1654,6 +1690,7 @@ Tap a key on the circle to lock it for students.<br/>
     below the fold where it had to be scrolled to. */}
 <button className="primary-btn songbook-btn" onClick={()=>setScreen("songbook")}>🎵 Songbook</button>
 <button className="ghost-btn" onClick={()=>startRound()}>🎮 Preview This Key</button>
+<button className="ghost-btn" onClick={()=>{logActivity("teacher",{type:"circle_fill_start"});setScreen("circleFill");}}>⭕ Fill in the Circle</button>
 <button className="ghost-btn" onClick={()=>{setActiveTab("lookup");setScreen("lookup");}}>🔍 Look Up a Key</button>
 <button className="ghost-btn" onClick={()=>setScreen("ptModeSelect")}>🇧🇷 Notas em Português</button>
 <button className="ghost-btn" onClick={startChordQuiz}>🎸 Chord Diagrams</button>
@@ -2145,6 +2182,7 @@ return (
 <div style={{textAlign:"center",fontSize:12,color:"var(--muted)"}}>One step back = the 4 · One step forward = the 5</div>
 <button className="primary-btn songbook-btn" onClick={()=>setScreen("songbook")}>🎵 Songbook</button>
 <button className="ghost-btn" onClick={()=>startRound()}>🎮 Start Practice</button>
+<button className="ghost-btn" onClick={()=>{logActivity(studentName,{type:"circle_fill_start"});setScreen("circleFill");}}>⭕ Fill in the Circle</button>
 <button className="ghost-btn" onClick={()=>{setActiveTab("lookup");setScreen("lookup");}}>🔍 Look Up a Key</button>
 <button className="ghost-btn" onClick={()=>setScreen("ptModeSelect")}>🇧🇷 Notas em Português</button>
 {studentInstrument==="guitar"&&<button className="ghost-btn" onClick={startChordQuiz}>🎸 Chord Diagrams</button>}
