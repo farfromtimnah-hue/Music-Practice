@@ -5,6 +5,8 @@ import RichVoicingsStudio from "./pianovoicings/RichVoicingsStudio.jsx";
 import KeyboardStudio from "./keyboard/KeyboardStudio.jsx";
 import Tuner from "./tuner/Tuner.jsx";
 import CircleFill from "./circlefill/CircleFill.jsx";
+import CircleGames from "./circlefill/CircleGames.jsx";
+import { CG_CSS } from "./circlefill/circleStyles.js";
 import Songbook from "./songbook/Songbook.jsx";
 import StudentsAdmin from "./auth/StudentsAdmin.jsx";
 import Invite from "./auth/Invite.jsx";
@@ -354,13 +356,15 @@ body{font-family:'Source Sans 3',sans-serif;background:var(--bg);color:var(--tex
 .cf-pbtn:active{transform:scale(.94);}
 .cf-pbtn.bad{border-color:var(--dim);background:rgba(239,83,80,.18);color:var(--dim);animation:shake .3s;}
 .cf-pbtn.hint{border-color:var(--gold);box-shadow:0 0 10px rgba(240,192,64,.6);}
-.cf-nums{display:grid;grid-template-columns:repeat(8,1fr);gap:6px;}
-.cf-notes{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;}
+.cf-nums{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+.cf-notes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
 .cf-results{display:flex;flex-direction:column;align-items:center;gap:10px;padding:8px 0;}
 .cf-score{font-family:'Oswald',sans-serif;font-size:56px;font-weight:700;color:var(--gold);}
 .cf-line{font-size:15px;color:var(--text);}
 .cf-msg{font-size:16px;color:var(--text);text-align:center;max-width:300px;line-height:1.5;margin-bottom:6px;}
 .cf-results .primary-btn,.cf-results .ghost-btn{max-width:300px;}
+
+${CG_CSS}
 
 /* QUIZ */
 .quiz-screen{min-height:100vh;display:flex;flex-direction:column;padding:40px 24px 32px;gap:24px;}
@@ -1619,7 +1623,14 @@ if (screen==="richVoicings") {
 // FILL IN THE CIRCLE — blank-circle practice, everyone
 if (screen==="circleFill") {
   return (<><style>{S}</style>
-    <CircleFill onBack={goHome} onLog={(a)=>logActivity(studentName||"teacher",a)}/>
+    <CircleFill onBack={goHome} studentName={studentName||"teacher"} onLog={(a)=>logActivity(studentName||"teacher",a)}/>
+  </>);
+}
+
+// CIRCLE GAMES: hand method, pass the key, rebuild the circle, stickers. Everyone.
+if (screen==="circleGames") {
+  return (<><style>{S}</style>
+    <CircleGames onBack={goHome} studentName={studentName||"teacher"} onLog={(a)=>logActivity(studentName||"teacher",a)}/>
   </>);
 }
 
@@ -1691,6 +1702,7 @@ Tap a key on the circle to lock it for students.<br/>
 <button className="primary-btn songbook-btn" onClick={()=>setScreen("songbook")}>🎵 Songbook</button>
 <button className="ghost-btn" onClick={()=>startRound()}>🎮 Preview This Key</button>
 <button className="ghost-btn" onClick={()=>{logActivity("teacher",{type:"circle_fill_start"});setScreen("circleFill");}}>⭕ Fill in the Circle</button>
+<button className="ghost-btn" onClick={()=>{logActivity("teacher",{type:"circle_games_open"});setScreen("circleGames");}}>🖐 Circle Games</button>
 <button className="ghost-btn" onClick={()=>{setActiveTab("lookup");setScreen("lookup");}}>🔍 Look Up a Key</button>
 <button className="ghost-btn" onClick={()=>setScreen("ptModeSelect")}>🇧🇷 Notas em Português</button>
 <button className="ghost-btn" onClick={startChordQuiz}>🎸 Chord Diagrams</button>
@@ -2183,6 +2195,7 @@ return (
 <button className="primary-btn songbook-btn" onClick={()=>setScreen("songbook")}>🎵 Songbook</button>
 <button className="ghost-btn" onClick={()=>startRound()}>🎮 Start Practice</button>
 <button className="ghost-btn" onClick={()=>{logActivity(studentName,{type:"circle_fill_start"});setScreen("circleFill");}}>⭕ Fill in the Circle</button>
+<button className="ghost-btn" onClick={()=>{logActivity(studentName,{type:"circle_games_open"});setScreen("circleGames");}}>🖐 Circle Games</button>
 <button className="ghost-btn" onClick={()=>{setActiveTab("lookup");setScreen("lookup");}}>🔍 Look Up a Key</button>
 <button className="ghost-btn" onClick={()=>setScreen("ptModeSelect")}>🇧🇷 Notas em Português</button>
 {studentInstrument==="guitar"&&<button className="ghost-btn" onClick={startChordQuiz}>🎸 Chord Diagrams</button>}

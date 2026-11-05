@@ -1931,3 +1931,12 @@ unchanged by this work. It costs nothing here: set and search share one
 `ChartView` and differ only by the `fromSet` flag, and the student branch of
 `chordText` returns before `fromSet` is consulted, so search is the strictly
 harder case and it passes.
+
+## Circle Games: hand method, stickers, two games (2026-11-05)
+
+Part 1: Fill in the Circle info stages now ask one question per screen. Screen A is the sharp or flat count with Next. Screen B is the notes question with Check Answer and Next. Scoring unchanged.
+Part 2: Shared pieces in src/circlefill/: Hand (SVG, drag plus tap), HandStep with "I know it", Sticker, FamilyReveal (letter line, keyboard hidden by default, Hear it with Web Audio), circleAudio.js, circleLogic.js (pure, node testable), circleData.js.
+Part 3: CircleFill takes mode ("classic" or "hand") and studentName. Hand mode replaces the names stages. Logs hand_fill_start and hand_fill_complete.
+Part 4: Pass the key. Part 5: Rebuild the circle. Both in CircleGames.jsx.
+Part 6: "Circle Games" button on teacher and student home, new circleGames screen in App.jsx.
+Part 7: scripts/check-circle-hand.mjs (269 checks pass). Service worker cache name is a build hash in vite.config.js, so it changes by itself.

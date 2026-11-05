@@ -1,7 +1,12 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import {
+  SHARP_ORDER, FLAT_ORDER, SHARP_KEYS, FLAT_KEYS, CIRCLE_ORDER, LETTERS, sideOf, pretty, prevKey,
+} from "./circleData.js";
+import { HandStep } from "./Hand.jsx";
+import FamilyReveal from "./Family.jsx";
 
 // ============================================================
-// FILL IN THE CIRCLE — the blank-circle version of the key practice.
+// FILL IN THE CIRCLE: the blank-circle version of the key practice.
 //
 // Four stages, in this order:
 //   1. Sharp side names   C, G, D, A, E, B, F#, C#
@@ -13,14 +18,7 @@ import { useState, useMemo } from "react";
 // sharp side, flats + naturals on the flat side. Naturals are decoys.
 // ============================================================
 
-const SHARP_ORDER = ["F", "C", "G", "D", "A", "E", "B"];
-const FLAT_ORDER = ["B", "E", "A", "D", "G", "C", "F"];
-const SHARP_KEYS = ["C", "G", "D", "A", "E", "B", "F#", "C#"];
-const FLAT_KEYS = ["F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb"];
-// same 15 positions, clockwise, as the main circle
-const CIRCLE_ORDER = ["C", "G", "D", "A", "E", "B", "F#", "C#", "Cb", "Gb", "Db", "Ab", "Eb", "Bb", "F"];
 const PALETTE = ["A", "Ab", "B", "Bb", "C", "C#", "Cb", "D", "Db", "E", "Eb", "F", "F#", "G", "Gb"];
-const LETTERS = ["A", "B", "C", "D", "E", "F", "G"];
 
 const sharpCount = (k) => (k === "C" ? 0 : SHARP_KEYS.indexOf(k));
 const flatCount = (k) => FLAT_KEYS.indexOf(k) + 1;
@@ -29,7 +27,6 @@ const notesFor = (k, side) =>
   side === "sharp"
     ? SHARP_ORDER.slice(0, sharpCount(k)).map((n) => n + "#")
     : FLAT_ORDER.slice(0, flatCount(k)).map((n) => n + "b");
-const sideOf = (k) => (k === "C" ? "neither" : SHARP_KEYS.includes(k) ? "sharp" : "flat");
 
 // 7 naturals on the top row, 7 accidentals under them
 const noteOptions = (side) => [...LETTERS, ...LETTERS.map((l) => l + (side === "sharp" ? "#" : "b"))];
@@ -40,14 +37,20 @@ const STAGES = [
   { id: "names-flat", kind: "names", side: "flat", keys: FLAT_KEYS, title: "Flat side: fill in the keys" },
   { id: "info-flat", kind: "info", side: "flat", keys: FLAT_KEYS, title: "Flat side: how many, and which" },
 ];
+// Hand mode swaps the two names stages for hand screens. C is already filled.
+const HAND_STAGES = [
+  { ...STAGES[0], id: "hand-sharp", kind: "hand", keys: SHARP_KEYS.slice(1), title: "Sharp side: use your hand" },
+  STAGES[1],
+  { ...STAGES[2], id: "hand-flat", kind: "hand", title: "Flat side: use your hand" },
+  STAGES[3],
+];
 
 const ACC = { sharp: "♯", flat: "♭" };
-const pretty = (k) => k.replace("#", "♯").replace(/(?<=.)b/, "♭");
 
-function BlankCircle({ filled, counts, active, stageKeys }) {
+export function BlankCircle({ filled, counts = {}, active, stageKeys = CIRCLE_ORDER, token, onSlot, marks = {}, small, center }) {
   const cx = 160, cy = 160, R = 148, rIn = 62, n = CIRCLE_ORDER.length;
   return (
-    <svg viewBox="0 0 320 320" className="cf-circle" role="img" aria-label="Circle of fifths to fill in">
+    <svg viewBox="0 0 320 320" className={`cf-circle ${small ? "cf-circle-sm" : ""}`} role="img" aria-label="Circle of fifths to fill in">
       {CIRCLE_ORDER.map((k, i) => {
         const a1 = (i / n) * 2 * Math.PI - Math.PI / 2;
         const a2 = ((i + 1) / n) * 2 * Math.PI - Math.PI / 2;
@@ -66,7 +69,7 @@ function BlankCircle({ filled, counts, active, stageKeys }) {
         const cnt = counts[k];
         const fs = k.length > 1 ? 11 : 13;
         return (
-          <g key={k}>
+          <g key={k} onClick={onSlot && !isFilled ? () => onSlot(k) : undefined} style={onSlot && !isFilled ? { cursor: "pointer" } : undefined}>
             <path d={path} fill={fill} stroke={stroke} strokeWidth={isActive ? 2.5 : 1} />
             {isFilled ? (
               <>
@@ -78,43 +81,64 @@ function BlankCircle({ filled, counts, active, stageKeys }) {
                 )}
               </>
             ) : (
-              <text x={lx} y={ly} textAnchor="middle" dominantBaseline="central" fontSize="13" fontFamily="Oswald,sans-serif" fill={isActive ? "#f0c040" : "#3a3a58"}>?</text>
+              <text x={lx} y={ly} textAnchor="middle" dominantBaseline="central" fontSize="13" fontFamily="Oswald,sans-serif" fill={isActive ? "#f0c040" : marks[k] ? "#e8e8f0" : "#3a3a58"}>{marks[k] || "?"}</text>
             )}
           </g>
         );
       })}
       <circle cx={cx} cy={cy} r={rIn - 1} fill="#13131f" stroke="#2a2a40" strokeWidth="1" />
-      <text x={cx} y={cy - 6} textAnchor="middle" fontSize="9" fill="#8888aa" fontFamily="Oswald" letterSpacing="2">FILL IN</text>
-      <text x={cx} y={cy + 8} textAnchor="middle" fontSize="9" fill="#8888aa" fontFamily="Oswald" letterSpacing="2">THE CIRCLE</text>
+      {(center || ["FILL IN", "THE CIRCLE"]).map((t, i, arr) => (
+        <text key={i} x={cx} y={cy + (i - (arr.length - 1) / 2) * 14} textAnchor="middle" dominantBaseline="central" fontSize="9" fill="#8888aa" fontFamily="Oswald" letterSpacing="2">{t}</text>
+      ))}
+      {token && (() => {
+        const i = CIRCLE_ORDER.indexOf(token);
+        const am = ((i + 0.5) / n) * 2 * Math.PI - Math.PI / 2;
+        const tr = rIn + 3 + 9;
+        return (
+          <g className="cg-token" style={{ transform: `translate(${cx + tr * Math.cos(am)}px, ${cy + tr * Math.sin(am)}px)` }}>
+            <circle r="8" fill="#f0c040" stroke="#0a0a0f" strokeWidth="2" />
+          </g>
+        );
+      })()}
     </svg>
   );
 }
 
-export default function CircleFill({ onBack, onLog }) {
+export default function CircleFill({ onBack, onLog, mode = "classic", studentName }) {
+  const hand = mode === "hand";
+  const stages = hand ? HAND_STAGES : STAGES;
   const [stage, setStage] = useState(0);          // 0..3, 4 = results
-  const [filled, setFilled] = useState({});       // key -> true once named
+  const [filled, setFilled] = useState(hand ? { C: true } : {});   // key -> true once named
   const [counts, setCounts] = useState({});       // key -> count, once the count is answered
   const [picked, setPicked] = useState(null);     // slot the student tapped, overrides the guided order
   const [misses, setMisses] = useState({});       // key -> wrong taps while naming
   const [flash, setFlash] = useState(null);       // palette button that was just wrong
-  const [nameOk, setNameOk] = useState({});       // key -> true when named first try
+  const [nameOk, setNameOk] = useState(hand ? { C: true } : {});     // key -> true when named first try
   const [countOk, setCountOk] = useState({});
   const [notesOk, setNotesOk] = useState({});
   const [infoIdx, setInfoIdx] = useState(0);
+  const [handIdx, setHandIdx] = useState(0);      // hand mode: which key of the side we are finding
+  const [phase, setPhase] = useState("count");    // info stages: count, notes, reveal (one question per screen)
   const [countPick, setCountPick] = useState(null);
   const [sel, setSel] = useState([]);
   const [checked, setChecked] = useState(false);
 
-  const st = STAGES[stage];
+  // hand mode logs its own start (classic mode is logged by the home button)
+  useEffect(() => { if (hand && onLog) onLog({ type: "hand_fill_start" }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const st = stages[stage];
   const stageKeys = st ? st.keys : [];
   const firstOpen = st && st.kind === "names" ? st.keys.find((k) => !filled[k]) : null;
-  const active = st && st.kind === "names" ? (picked && !filled[picked] && st.keys.includes(picked) ? picked : firstOpen) : st && st.kind === "info" ? st.keys[infoIdx] : null;
+  const handKey = st && st.kind === "hand" ? st.keys[handIdx] : null;
+  const active = st && st.kind === "names" ? (picked && !filled[picked] && st.keys.includes(picked) ? picked : firstOpen) : st && st.kind === "info" ? st.keys[infoIdx] : handKey;
   const namesDone = st && st.kind === "names" && !firstOpen;
 
+  const resetInfo = () => { setInfoIdx(0); setPhase("count"); setCountPick(null); setSel([]); setChecked(false); };
+
   const restart = () => {
-    setStage(0); setFilled({}); setCounts({}); setPicked(null); setMisses({}); setFlash(null);
-    setNameOk({}); setCountOk({}); setNotesOk({}); setInfoIdx(0); setCountPick(null); setSel([]); setChecked(false);
-    onLog && onLog({ type: "circle_fill_start" });
+    setStage(0); setFilled(hand ? { C: true } : {}); setCounts({}); setPicked(null); setMisses({}); setFlash(null);
+    setNameOk(hand ? { C: true } : {}); setCountOk({}); setNotesOk({}); setHandIdx(0); resetInfo();
+    onLog && onLog({ type: hand ? "hand_fill_start" : "circle_fill_start" });
   };
 
   const pickName = (opt) => {
@@ -131,12 +155,22 @@ export default function CircleFill({ onBack, onLog }) {
   };
 
   const nextStage = () => {
-    setPicked(null); setInfoIdx(0); setCountPick(null); setSel([]); setChecked(false);
+    setPicked(null); resetInfo(); setHandIdx(0);
     const nx = stage + 1;
     setStage(nx);
-    if (nx >= STAGES.length) {
-      onLog && onLog({ type: "circle_fill_complete", correct: score.total, total: score.max });
+    if (nx >= stages.length) {
+      onLog && onLog({ type: hand ? "hand_fill_complete" : "circle_fill_complete", correct: score.total, total: score.max });
     }
+  };
+
+  // hand mode: the hand (or I know it) found the key. Full credit, nothing is ever marked wrong.
+  const handSolved = () => {
+    setFilled((f) => ({ ...f, [handKey]: true }));
+    setNameOk((o) => ({ ...o, [handKey]: true }));
+  };
+  const handNext = () => {
+    if (handIdx + 1 >= st.keys.length) nextStage();
+    else setHandIdx(handIdx + 1);
   };
 
   const answerCount = (n) => {
@@ -158,7 +192,7 @@ export default function CircleFill({ onBack, onLog }) {
 
   const nextInfo = () => {
     if (infoIdx + 1 >= st.keys.length) { nextStage(); return; }
-    setInfoIdx(infoIdx + 1); setCountPick(null); setSel([]); setChecked(false);
+    setInfoIdx(infoIdx + 1); setPhase("count"); setCountPick(null); setSel([]); setChecked(false);
   };
 
   const score = useMemo(() => {
@@ -169,7 +203,7 @@ export default function CircleFill({ onBack, onLog }) {
   }, [nameOk, countOk, notesOk]);
 
   // ---------- results ----------
-  if (stage >= STAGES.length) {
+  if (stage >= stages.length) {
     const pct = Math.round((score.total / score.max) * 100);
     const msg = pct === 100 ? "Perfect. You filled in the whole circle from memory." : pct >= 80 ? "Really strong. Try again to make it perfect." : pct >= 60 ? "Good work. Do it again and watch it improve." : "Keep going. Every pass builds the memory.";
     return (
@@ -178,12 +212,12 @@ export default function CircleFill({ onBack, onLog }) {
           <div className="cf-hint">Fill in the circle</div>
           <BlankCircle filled={filled} counts={counts} active={null} stageKeys={[]} />
           <div className="cf-score">{pct}%</div>
-          <div className="cf-line">Keys named first try: {score.names} of 15</div>
+          <div className="cf-line">{hand ? "Keys found" : "Keys named first try"}: {score.names} of 15</div>
           <div className="cf-line">Counts right: {score.cnt} of 15</div>
           <div className="cf-line">Notes right: {score.notes} of 15</div>
           <div className="cf-msg">{msg}</div>
           <button className="primary-btn" onClick={restart}>Try Again</button>
-          <button className="ghost-btn" onClick={onBack}>Back to Home</button>
+          <button className="ghost-btn" onClick={onBack}>{hand ? "Back" : "Back to Home"}</button>
         </div>
       </div>
     );
@@ -194,18 +228,39 @@ export default function CircleFill({ onBack, onLog }) {
   const answerNotes = infoKey ? notesFor(infoKey, st.side) : [];
   const accWord = st.side === "sharp" ? "sharps" : "flats";
   const needHint = st.kind === "names" && active && (misses[active] || 0) >= 2;
-  const doneCount = st.kind === "names" ? st.keys.filter((k) => filled[k]).length : infoIdx + (checked ? 1 : 0);
+  const doneCount = st.kind === "names" ? st.keys.filter((k) => filled[k]).length : st.kind === "hand" ? st.keys.filter((k) => filled[k]).length : infoIdx + (phase === "reveal" ? 1 : 0);
+  const lastInfo = st.kind === "info" && infoIdx + 1 >= st.keys.length;
+  const revealNext = lastInfo ? (stage === 3 ? "See results" : "Next: flat side") : "Next key";
+  const reveal = st.kind === "info" && phase === "reveal";
 
   return (
     <div className="cf-shell">
       <div className="cf-head">
-        <button className="cf-back" onClick={onBack}>← Exit</button>
+        <button className="cf-back" onClick={onBack}>{"\u2190"} Exit</button>
         <div className="cf-stage">Part {stage + 1} of 4</div>
         <div className="cf-count">{doneCount}/{st.keys.length}</div>
       </div>
-      <div className="cf-title">{st.title}</div>
 
-      <BlankCircle filled={filled} counts={counts} active={active} stageKeys={stageKeys} />
+      {reveal ? (
+        <FamilyReveal key={infoKey} keyName={infoKey} studentName={studentName || "teacher"} nextLabel={revealNext} onNext={nextInfo} onLog={onLog} />
+      ) : (
+        <>
+          <div className="cf-title">{st.title}</div>
+          <BlankCircle filled={filled} counts={counts} active={active} stageKeys={stageKeys} small={st.kind !== "names"} />
+        </>
+      )}
+
+      {st.kind === "hand" && (
+        <HandStep
+          key={handKey}
+          prev={prevKey(handKey)}
+          target={handKey}
+          side={st.side}
+          nextLabel={handIdx + 1 >= st.keys.length ? (stage === 0 ? "Next: how many sharps" : "Next: how many flats") : "Next key"}
+          onSolved={handSolved}
+          onNext={handNext}
+        />
+      )}
 
       {st.kind === "names" && (
         <>
@@ -235,14 +290,13 @@ export default function CircleFill({ onBack, onLog }) {
               <div className={`feedback ${flash ? "no" : ""}`}>{flash ? "Not that one. Try again." : needHint ? "Hint: the glowing key is the answer." : ""}</div>
             </>
           )}
-          {namesDone && <button className="primary-btn" onClick={nextStage}>{stage === 0 ? "Next: how many sharps →" : "Next: how many flats →"}</button>}
+          {namesDone && <button className="primary-btn" onClick={nextStage}>{stage === 0 ? "Next: how many sharps \u2192" : "Next: how many flats \u2192"}</button>}
         </>
       )}
 
-      {st.kind === "info" && (
+      {st.kind === "info" && phase === "count" && (
         <>
-          <div className="cf-ask">Key of <strong>{pretty(infoKey)}</strong> Major</div>
-          <div className="q-card"><div className="q-text">How many {accWord} does {pretty(infoKey)} have?</div></div>
+          <div className="q-card"><div className="q-text">How many {accWord} does the key of {pretty(infoKey)} have?</div></div>
           <div className="cf-nums">
             {[0, 1, 2, 3, 4, 5, 6, 7].map((n) => {
               const right = n === countFor(infoKey, st.side);
@@ -254,11 +308,22 @@ export default function CircleFill({ onBack, onLog }) {
           {countPick !== null && (
             <>
               <div className="feedback ok" style={{ color: countPick === countFor(infoKey, st.side) ? "var(--green)" : "var(--dim)" }}>
-                {countPick === countFor(infoKey, st.side) ? "✓ Correct" : `✗ It has ${countFor(infoKey, st.side)}`}
+                {countPick === countFor(infoKey, st.side) ? "\u2713 Correct" : `\u2717 It has ${countFor(infoKey, st.side)}`}
               </div>
-              <div className="q-card"><div className="q-text">{answerNotes.length === 0 && infoKey === "C" ? "Which notes are sharp or flat in C? Tap none, then Check." : `Which notes are ${st.side} in ${pretty(infoKey)}? Tap every one.`}</div></div>
+              <button className="primary-btn cg-next" onClick={() => setPhase("notes")}>Next</button>
+            </>
+          )}
+        </>
+      )}
+
+      {st.kind === "info" && phase === "notes" && (
+        <>
+          <div className="q-card"><div className="q-text">{answerNotes.length === 0 && infoKey === "C" ? "Which notes are sharp or flat in C? Tap none, then Check." : `Which notes are ${st.side} in ${pretty(infoKey)}? Tap every one.`}</div></div>
+          {[["Plain", LETTERS], [st.side === "sharp" ? "Sharp" : "Flat", LETTERS.map((l) => l + (st.side === "sharp" ? "#" : "b"))]].map(([lbl, opts]) => (
+            <div key={lbl} className="cg-grp">
+              <div className="cg-grp-lbl">{lbl}</div>
               <div className="cf-notes">
-                {noteOptions(st.side).map((o) => {
+                {opts.map((o) => {
                   const inRight = answerNotes.includes(o), isSel = sel.includes(o);
                   let cls = "multi-btn";
                   if (checked) { if (inRight && isSel) cls += " multi-right"; else if (!inRight && isSel) cls += " multi-wrong"; else if (inRight) cls += " multi-missed"; }
@@ -266,15 +331,15 @@ export default function CircleFill({ onBack, onLog }) {
                   return <button key={o} className={cls} disabled={checked} onClick={() => toggle(o)}>{pretty(o)}</button>;
                 })}
               </div>
-              {!checked && <button className="primary-btn" onClick={check}>Check Answer</button>}
-              {checked && (
-                <>
-                  <div className="feedback" style={{ color: notesOk[infoKey] ? "var(--green)" : "var(--dim)" }}>
-                    {notesOk[infoKey] ? "✓ Correct" : `✗ Correct: ${answerNotes.length ? answerNotes.map(pretty).join(", ") : "none"}`}
-                  </div>
-                  <button className="primary-btn" onClick={nextInfo}>{infoIdx + 1 >= st.keys.length ? (stage === 3 ? "See Results →" : "Next: flat side →") : "Next key →"}</button>
-                </>
-              )}
+            </div>
+          ))}
+          {!checked && <button className="primary-btn cg-next" onClick={check}>Check Answer</button>}
+          {checked && (
+            <>
+              <div className="feedback" style={{ color: notesOk[infoKey] ? "var(--green)" : "var(--dim)" }}>
+                {notesOk[infoKey] ? "\u2713 Correct" : `\u2717 Correct: ${answerNotes.length ? answerNotes.map(pretty).join(", ") : "none"}`}
+              </div>
+              <button className="primary-btn cg-next" onClick={() => setPhase("reveal")}>Next</button>
             </>
           )}
         </>
