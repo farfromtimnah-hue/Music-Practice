@@ -1,4 +1,5 @@
 import stytch from "stytch";
+import { acceptsPasskey } from "./household.js";
 
 const INSTRUMENTS = ["guitar", "bass", "keys"];
 const PROD_ORIGINS = ["https://farfromtimnah-hue.github.io", "https://music-practice-8p2.pages.dev"];
@@ -322,7 +323,13 @@ const routes = [
       session_duration_minutes: 60,
     });
     // The passkey must be one registered for THIS student (siblings can share a parent phone / Stytch user).
-    if (r.user_id !== s.stytch_user_id || !ids(s).includes(r.webauthn_registration_id))
+    // Household rule: siblings share a parent phone and a borrowed device, so a passkey registered by any
+    // active student row with the same stytch_user_id signs in any child on that phone number.
+    // Teacher rows are never part of this (role = 'student' only).
+    const sib = s.stytch_user_id
+      ? (await env.DB.prepare("SELECT passkey_ids FROM students WHERE active = 1 AND role = 'student' AND stytch_user_id = ? AND id != ?").bind(s.stytch_user_id, s.id).all()).results
+      : [];
+    if (!acceptsPasskey(s, sib, r))
       throw new HttpError(401, "That passkey does not belong to this student");
     return { authenticated: true, student: publicStudent(s), session_token: r.session_token };
   }],

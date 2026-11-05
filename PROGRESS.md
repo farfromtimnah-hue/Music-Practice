@@ -1940,3 +1940,10 @@ Part 3: CircleFill takes mode ("classic" or "hand") and studentName. Hand mode r
 Part 4: Pass the key. Part 5: Rebuild the circle. Both in CircleGames.jsx.
 Part 6: "Circle Games" button on teacher and student home, new circleGames screen in App.jsx.
 Part 7: scripts/check-circle-hand.mjs (269 checks pass). Service worker cache name is a build hash in vite.config.js, so it changes by itself.
+
+## Household passkey sign-in (2026-11-05)
+
+Worker change: a passkey registered by any active student row with the same stytch_user_id now signs in any active student row with that stytch_user_id. Children keep their own rows. New pure function acceptsPasskey in worker/src/household.js, used in POST /auth/passkey (student branch only) with one sibling query (role = 'student', active = 1, same stytch_user_id, id != student). /auth/passkey/start, teacher sign-in, passkeyFlow, response and 401 message unchanged.
+Files: worker/src/household.js (new), worker/src/index.js, worker/test/household-passkey.test.mjs (new), PROGRESS.md.
+Test: node worker/test/household-passkey.test.mjs, 8 passed. node --check on both worker files OK. npx vite build OK.
+NOT DEPLOYED, awaiting review. Untested against real Stytch or a real phone.
